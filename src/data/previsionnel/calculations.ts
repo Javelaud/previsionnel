@@ -458,15 +458,16 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
   // ── Bilan simplifié par an ────────────────────────────────────────────────
   const totalImmobAmort = getTotalImmobilisationsAmortissables(b);
   const dotAnnuelle = getDotationAmortissementAnnuelle(b);
-  // Immobilisations nettes = investissement initial - amortissements cumulés
+  // Immobilisations nettes = immob N-1 (si société existante) + nouveaux invest. - amortissements cumulés
+  const immobBaseN1 = b.balanceNmoins1?.immobilisationsNettes ?? 0;
   const bilanActifImmobilisationsNettes: T3 = [
-    Math.max(0, totalImmobAmort + b.besoins.terrain - dotAnnuelle),
-    Math.max(0, totalImmobAmort + b.besoins.terrain - 2 * dotAnnuelle),
-    Math.max(0, totalImmobAmort + b.besoins.terrain - 3 * dotAnnuelle),
+    Math.max(0, immobBaseN1 + totalImmobAmort + b.besoins.terrain - dotAnnuelle),
+    Math.max(0, immobBaseN1 + totalImmobAmort + b.besoins.terrain - 2 * dotAnnuelle),
+    Math.max(0, immobBaseN1 + totalImmobAmort + b.besoins.terrain - 3 * dotAnnuelle),
   ];
-  // Stocks : stock initial (constant, simplifié)
-  const stocksInitial = b.besoins.stockMatieresProduits ?? 0;
-  const bilanActifStocks: T3 = [stocksInitial, stocksInitial, stocksInitial];
+  // Stocks : stocks N-1 (si société existante) ou stock de départ saisi
+  const stocksBase = b.balanceNmoins1?.stocks ?? (b.besoins.stockMatieresProduits ?? 0);
+  const bilanActifStocks: T3 = [stocksBase, stocksBase, stocksBase];
   // Créances = BFR créances
   const bilanActifCreances: T3 = creancesClientsParAn;
   // Trésorerie à la fin de chaque année
