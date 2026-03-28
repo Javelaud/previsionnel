@@ -1,0 +1,1910 @@
+"use client";
+
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+  ResponsiveContainer,
+} from "recharts";
+import { BudgetPrevisionnel } from "@/data/previsionnel/types";
+import { getClient, getBudgetsForClient, createNewBudget, saveBudget } from "@/data/previsionnel/storage";
+import {
+  calculerPrevisionnel,
+  getTotalBesoins,
+  getTotalFinancement,
+} from "@/data/previsionnel/calculations";
+import { exportToExcel } from "@/data/previsionnel/excel-export";
+import { SECTEURS_ACTIVITES, TOUTES_ACTIVITES } from "@/data/previsionnel/activites-ape";
+import { useEquilibre } from "@/contexts/equilibre-context";
+
+// ---- Helpers ----
+
+function eur(n: number): string {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+}
+
+function pct(n: number): string {
+  return (n * 100).toFixed(1) + " %";
+}
+
+const MOIS_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+
+// ---- NumberInput ----
+
+interface NumberInputProps {
+  value: number;
+  onChange: (val: number) => void;
+  className?: string;
+  placeholder?: string;
+  min?: number;
+  step?: number;
+}
+
+function NumberInput({ value, onChange, className = "", placeholder = "0", min, step }: NumberInputProps) {
+  const [local, setLocal] = useState(value === 0 ? "" : String(value));
+  const focusRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusRef.current) {
+      setLocal(value === 0 ? "" : String(value));
+    }
+  }, [value]);
+
+  return (
+    <Input
+      type="number"
+      value={local}
+      placeholder={placeholder}
+      min={min}
+      step={step}
+      className={`text-right ${className}`}
+      onFocus={() => { focusRef.current = true; }}
+      onChange={(e) => {
+        setLocal(e.target.value);
+        const parsed = parseFloat(e.target.value);
+        onChange(isNaN(parsed) ? 0 : parsed);
+      }}
+      onBlur={() => {
+        focusRef.current = false;
+        const parsed = parseFloat(local);
+        const clean = isNaN(parsed) ? 0 : parsed;
+        setLocal(clean === 0 ? "" : String(clean));
+        onChange(clean);
+      }}
+    />
+  );
+}
+
+// ---- Échéancier ----
+
+interface EcheancierLigne {
+  mois: number;
+  mensualite: number;
+  capital: number;
+  interets: number;
+  capitalRestant: number;
+}
+
+function genererEcheancier(montant: number, tauxAnnuel: number, dureeMois: number): EcheancierLigne[] {
+  if (montant <= 0 || dureeMois <= 0) return [];
+  const tauxMensuel = tauxAnnuel / 12;
+  let mensualite: number;
+  if (tauxMensuel === 0) {
+    mensualite = montant / dureeMois;
+  } else {
+    mensualite = (montant * tauxMensuel) / (1 - Math.pow(1 + tauxMensuel, -dureeMois));
+  }
+  const lignes: EcheancierLigne[] = [];
+  let capitalRestant = montant;
+  for (let m = 1; m <= dureeMois; m++) {
+    const interets = capitalRestant * tauxMensuel;
+    const capital = mensualite - interets;
+    capitalRestant = Math.max(0, capitalRestant - capital);
+    lignes.push({
+      mois: m,
+      mensualite: Math.round(mensualite * 100) / 100,
+      capital: Math.round(capital * 100) / 100,
+      interets: Math.round(interets * 100) / 100,
+      capitalRestant: Math.round(capitalRestant * 100) / 100,
+    });
+  }
+  return lignes;
+}
+
+function EcheancierDialog({ pret }: { pret: { nom: string; montant: number; taux: number; dureeMois: number } }) {
+  const lignes = genererEcheancier(pret.montant, pret.taux, pret.dureeMois);
+  const totalInterets = lignes.reduce((s, l) => s + l.interets, 0);
+  const totalCapital = lignes.reduce((s, l) => s + l.capital, 0);
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2" disabled={pret.montant <= 0 || pret.dureeMois <= 0}>
+          <CalendarRange className="h-4 w-4" />
+          Échéancier
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Échéancier — {pret.nom}</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            {eur(pret.montant)} à {(pret.taux * 100).toFixed(2)}% sur {pret.dureeMois} mois
+            — Mensualité : {eur(lignes[0]?.mensualite ?? 0)}
+          </p>
+        </DialogHeader>
+        <div className="overflow-y-auto flex-1 -mx-6 px-6">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-right w-16">Mois</TableHead>
+                <TableHead className="text-right">Mensualité</TableHead>
+                <TableHead className="text-right">Capital</TableHead>
+                <TableHead className="text-right">Intérêts</TableHead>
+                <TableHead className="text-right">Capital restant</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lignes.map((l) => (
+                <TableRow key={l.mois}>
+                  <TableCell className="text-right font-medium">{l.mois}</TableCell>
+                  <TableCell className="text-right">{eur(l.mensualite)}</TableCell>
+                  <TableCell className="text-right">{eur(l.capital)}</TableCell>
+                  <TableCell className="text-right">{eur(l.interets)}</TableCell>
+                  <TableCell className="text-right">{eur(l.capitalRestant)}</TableCell>
+                </TableRow>
+              ))}
+              <TableRow className="font-bold border-t-2">
+                <TableCell className="text-right">Total</TableCell>
+                <TableCell className="text-right">{eur(totalCapital + totalInterets)}</TableCell>
+                <TableCell className="text-right">{eur(totalCapital)}</TableCell>
+                <TableCell className="text-right">{eur(totalInterets)}</TableCell>
+                <TableCell className="text-right">—</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---- Row helpers ----
+
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[200px_1fr] items-center gap-3 py-1">
+      <Label className="text-sm text-right pr-2 text-muted-foreground">{label}</Label>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function ThreeYearRow({
+  label,
+  values,
+  onChange,
+}: {
+  label: string;
+  values: [number, number, number];
+  onChange: (vals: [number, number, number]) => void;
+}) {
+  return (
+    <tr className="border-b border-border/40">
+      <td className="py-1.5 pr-3 text-sm text-muted-foreground">{label}</td>
+      {[0, 1, 2].map((i) => (
+        <td key={i} className="py-1 px-1">
+          <NumberInput
+            value={values[i]}
+            onChange={(v) => {
+              const next: [number, number, number] = [...values] as [number, number, number];
+              next[i] = v;
+              onChange(next);
+            }}
+            className="w-full text-right h-8"
+          />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+function ResultRow({ label, values, bold }: { label: string; values: [number, number, number]; bold?: boolean }) {
+  return (
+    <tr className={`border-b border-border/30 ${bold ? "font-semibold bg-muted/20" : ""}`}>
+      <td className="py-1.5 pr-3 text-sm">{label}</td>
+      {values.map((v, i) => (
+        <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>
+          {eur(v)}
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+// ---- Deep merge utility ----
+
+function deepMerge<T>(base: T, patch: DeepPartial<T>): T {
+  const result = { ...base } as Record<string, unknown>;
+  for (const key in patch) {
+    const pv = (patch as Record<string, unknown>)[key];
+    const bv = (base as Record<string, unknown>)[key];
+    if (pv !== null && typeof pv === "object" && !Array.isArray(pv) && typeof bv === "object" && bv !== null && !Array.isArray(bv)) {
+      result[key] = deepMerge(bv as Record<string, unknown>, pv as Record<string, unknown>);
+    } else {
+      result[key] = pv;
+    }
+  }
+  return result as T;
+}
+
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
+};
+
+// ---- Page ----
+
+export default function Page() {
+  const params = useParams();
+  const id = params.id as string;
+  const [budget, setBudget] = useState<BudgetPrevisionnel | null>(null);
+  const [clientNom, setClientNom] = useState<string>("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const { setData: setEquilibreData } = useEquilibre();
+  const [expandInvestissements, setExpandInvestissements] = useState(false);
+  const [expandFinancements, setExpandFinancements] = useState(false);
+  const [expandEncaissements, setExpandEncaissements] = useState(false);
+  const [expandDepenses, setExpandDepenses] = useState(false);
+  const [expandChargesExternes, setExpandChargesExternes] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const client = getClient(id);
+    if (client) setClientNom(client.nom);
+    const budgets = getBudgetsForClient(id);
+    if (budgets.length > 0) {
+      setBudget(budgets[0]);
+    } else {
+      const newBudget = createNewBudget(id);
+      setBudget(newBudget);
+    }
+  }, [id]);
+
+  const updateBudget = useCallback((patch: DeepPartial<BudgetPrevisionnel>) => {
+    setBudget((prev) => {
+      if (!prev) return prev;
+      const updated = deepMerge(prev, patch);
+      // Debounced save
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      setSaveStatus("saving");
+      saveTimer.current = setTimeout(() => {
+        saveBudget(updated);
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      }, 500);
+      return updated;
+    });
+  }, []);
+
+  // Alimenter le widget équilibre dans le sidebar (doit être avant tout return conditionnel)
+  const equilibreResultats = budget ? calculerPrevisionnel(budget) : null;
+  const eqTotalEmplois = equilibreResultats && budget
+    ? getTotalBesoins(budget) + equilibreResultats.variationBfrParAn[0] + equilibreResultats.remboursementsEmpruntParAn[0]
+      + (budget.divers?.dividendes?.[0] ?? 0) + (budget.divers?.remboursementsComptesCourants?.[0] ?? 0)
+    : 0;
+  const eqTotalRessources = equilibreResultats && budget
+    ? getTotalFinancement(budget) + equilibreResultats.capaciteAutofinancementParAn[0]
+    : 0;
+  const eqTresorerieAn1 = equilibreResultats?.excedentTresorerieParAn[0] ?? 0;
+  useEffect(() => {
+    if (budget) {
+      setEquilibreData({ totalEmplois: eqTotalEmplois, totalRessources: eqTotalRessources, tresorerieAn1: eqTresorerieAn1 });
+    }
+    return () => setEquilibreData(null);
+  }, [eqTotalEmplois, eqTotalRessources, eqTresorerieAn1, setEquilibreData, budget]);
+
+  if (!mounted || !budget) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-muted-foreground">Chargement...</p>
+      </div>
+    );
+  }
+
+  const resultats = calculerPrevisionnel(budget);
+
+  const tresoChartData = resultats.tresorerieMensuelle.map((t, i) => ({
+    mois: MOIS_LABELS[i].slice(0, 3),
+    tresorerie: t,
+  }));
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <Link href="/previsionnel">
+              <Button variant="ghost" size="sm" className="gap-1">
+                <ArrowLeft className="h-4 w-4" />
+                Retour
+              </Button>
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold">{clientNom || "Client"}</h1>
+              <p className="text-sm text-muted-foreground">{budget.infos.intituleProjet || "Budget prévisionnel"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {saveStatus === "saving" && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Save className="h-3 w-3 animate-pulse" /> Enregistrement...
+              </span>
+            )}
+            {saveStatus === "saved" && (
+              <span className="text-xs text-green-600 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" /> Sauvegardé
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => exportToExcel(budget, resultats)}
+            >
+              <Download className="h-4 w-4" />
+              Exporter Excel
+            </Button>
+          </div>
+        </div>
+
+        <Tabs defaultValue="informations">
+          <TabsList className="flex-wrap h-auto gap-1">
+            <TabsTrigger value="informations">Informations</TabsTrigger>
+            <TabsTrigger value="investissements">Investissements</TabsTrigger>
+            <TabsTrigger value="financement">Financement</TabsTrigger>
+            <TabsTrigger value="charges-fixes">Charges fixes</TabsTrigger>
+            <TabsTrigger value="impots-taxes">Impôts & Taxes</TabsTrigger>
+            <TabsTrigger value="chiffre-affaires">Chiffre d&apos;affaires</TabsTrigger>
+            <TabsTrigger value="salaires">Salaires</TabsTrigger>
+            <TabsTrigger value="divers">Divers</TabsTrigger>
+            <TabsTrigger value="resultats">Résultats</TabsTrigger>
+          </TabsList>
+
+          {/* ---- INFORMATIONS ---- */}
+          <TabsContent value="informations">
+            <Card>
+              <CardHeader>
+                <CardTitle>Section 1 — Informations générales</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <FieldRow label="Prénom Nom">
+                  <Input
+                    value={budget.infos.prenomNom}
+                    onChange={(e) => updateBudget({ infos: { prenomNom: e.target.value } })}
+                    placeholder="Jean Dupont"
+                  />
+                </FieldRow>
+                <FieldRow label="Intitulé du projet">
+                  <Input
+                    value={budget.infos.intituleProjet}
+                    onChange={(e) => updateBudget({ infos: { intituleProjet: e.target.value } })}
+                    placeholder="Mon projet"
+                  />
+                </FieldRow>
+                <FieldRow label="Activité">
+                  <div className="space-y-1">
+                    <select
+                      value={budget.infos.activite || ""}
+                      onChange={(e) => {
+                        const selected = TOUTES_ACTIVITES.find((a) => a.label === e.target.value);
+                        updateBudget({ infos: { activite: e.target.value, codeAPE: selected?.codeAPE ?? "" } });
+                      }}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="">— Sélectionner une activité —</option>
+                      {SECTEURS_ACTIVITES.map((secteur) => (
+                        <optgroup key={secteur.secteur} label={secteur.secteur}>
+                          {secteur.activites.map((a) => (
+                            <option key={a.label} value={a.label}>{a.label}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    {budget.infos.codeAPE && (
+                      <p className="text-xs text-muted-foreground">Code APE : <span className="font-mono font-medium">{budget.infos.codeAPE}</span></p>
+                    )}
+                  </div>
+                </FieldRow>
+                <FieldRow label="Statut juridique">
+                  <select
+                    value={budget.infos.statutJuridique}
+                    onChange={(e) => updateBudget({ infos: { statutJuridique: e.target.value as BudgetPrevisionnel["infos"]["statutJuridique"] } })}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option>Micro-entreprise</option>
+                    <option>Entreprise individuelle au réel (IR)</option>
+                    <option>EURL (IS)</option>
+                    <option>SARL (IS)</option>
+                    <option>SAS (IS)</option>
+                    <option>SASU (IS)</option>
+                  </select>
+                </FieldRow>
+                <FieldRow label="Téléphone">
+                  <Input
+                    value={budget.infos.telephone}
+                    onChange={(e) => updateBudget({ infos: { telephone: e.target.value } })}
+                    placeholder="06 00 00 00 00"
+                  />
+                </FieldRow>
+                <FieldRow label="Email">
+                  <Input
+                    value={budget.infos.email}
+                    onChange={(e) => updateBudget({ infos: { email: e.target.value } })}
+                    placeholder="contact@example.com"
+                  />
+                </FieldRow>
+                <FieldRow label="Ville">
+                  <Input
+                    value={budget.infos.ville}
+                    onChange={(e) => updateBudget({ infos: { ville: e.target.value } })}
+                    placeholder="Paris"
+                  />
+                </FieldRow>
+                <FieldRow label="Type de vente">
+                  <select
+                    value={budget.infos.typeVente}
+                    onChange={(e) => updateBudget({ infos: { typeVente: e.target.value as BudgetPrevisionnel["infos"]["typeVente"] } })}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option>Marchandises (y compris hébergement et restauration)</option>
+                    <option>Services</option>
+                    <option>Mixte</option>
+                  </select>
+                </FieldRow>
+                <FieldRow label="ACRE">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="acre"
+                      checked={budget.infos.acre}
+                      onChange={(e) => updateBudget({ infos: { acre: e.target.checked } })}
+                      className="h-4 w-4 rounded border-input"
+                    />
+                    <Label htmlFor="acre" className="cursor-pointer">
+                      Bénéficiaire de l&apos;ACRE (réduction de charges 1ère année)
+                    </Label>
+                  </div>
+                </FieldRow>
+                <div className="h-px bg-border my-4" />
+                <p className="text-sm text-muted-foreground mb-3">Besoin en fonds de roulement (BFR)</p>
+                <FieldRow label="Délai clients (jours)">
+                  <div className="flex items-center gap-2">
+                    <NumberInput
+                      value={budget.bfr.delaiClientsJours}
+                      onChange={(v) => updateBudget({ bfr: { delaiClientsJours: v } })}
+                      className="w-24"
+                      step={1}
+                      min={0}
+                    />
+                    <span className="text-sm text-muted-foreground">jours de crédit accordés aux clients</span>
+                  </div>
+                </FieldRow>
+                <FieldRow label="Délai fournisseurs (jours)">
+                  <div className="flex items-center gap-2">
+                    <NumberInput
+                      value={budget.bfr.delaiFournisseursJours}
+                      onChange={(v) => updateBudget({ bfr: { delaiFournisseursJours: v } })}
+                      className="w-24"
+                      step={1}
+                      min={0}
+                    />
+                    <span className="text-sm text-muted-foreground">jours de crédit accordés par les fournisseurs</span>
+                  </div>
+                </FieldRow>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- INVESTISSEMENTS ---- */}
+          <TabsContent value="investissements">
+            <Card>
+              <CardHeader>
+                <CardTitle>Section 2 — Besoins de démarrage</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground mb-3">Investissements amortissables</p>
+                  <div className="grid grid-cols-[1fr_8rem_5rem] gap-2 items-center mb-2">
+                    <span className="text-xs font-medium text-muted-foreground">Investissement</span>
+                    <span className="text-xs font-medium text-muted-foreground text-right">Montant (€)</span>
+                    <span className="text-xs font-medium text-muted-foreground text-right">Durée (ans)</span>
+                  </div>
+                  {[
+                    { key: "fraisEtablissement", label: "Frais d'établissement" },
+                    { key: "logicielsFormations", label: "Logiciels et formations" },
+                    { key: "depotMarqueBrevet", label: "Dépôt de marque / brevet" },
+                    { key: "droitsEntree", label: "Droits d'entrée (franchise)" },
+                    { key: "achatFondsCommerce", label: "Achat fonds de commerce" },
+                    { key: "droitAuBail", label: "Droit au bail" },
+                    { key: "enseigneCommunication", label: "Enseigne et communication" },
+                    { key: "achatImmobilier", label: "Achat immobilier" },
+                    { key: "travauxAmenagements", label: "Travaux et aménagements" },
+                    { key: "materiel", label: "Matériel et équipements" },
+                    { key: "materielBureau", label: "Matériel de bureau / informatique" },
+                  ].map(({ key, label }) => {
+                    const inv = (budget.besoins as unknown as Record<string, { montant: number; dureeAmortissement: number }>)[key];
+                    return (
+                      <div key={key} className="grid grid-cols-[1fr_8rem_5rem] gap-2 items-center">
+                        <Label className="text-sm">{label}</Label>
+                        <NumberInput
+                          value={inv.montant}
+                          onChange={(v) => updateBudget({ besoins: { [key]: { ...inv, montant: v } } })}
+                          className="w-full"
+                        />
+                        <NumberInput
+                          value={inv.dureeAmortissement}
+                          onChange={(v) => updateBudget({ besoins: { [key]: { ...inv, dureeAmortissement: Math.max(1, v) } } })}
+                          className="w-full"
+                          min={1}
+                          step={1}
+                        />
+                      </div>
+                    );
+                  })}
+
+                  <div className="h-px bg-border my-4" />
+                  <p className="text-sm text-muted-foreground mb-3">Immobilisation non amortissable</p>
+                  <FieldRow label="Terrain">
+                    <NumberInput
+                      value={budget.besoins.terrain}
+                      onChange={(v) => updateBudget({ besoins: { terrain: v } })}
+                      className="w-48"
+                    />
+                  </FieldRow>
+
+                  <div className="h-px bg-border my-4" />
+                  <p className="text-sm text-muted-foreground mb-3">Charges (non amortissables)</p>
+                  {[
+                    { key: "fraisDossier", label: "Frais de dossier" },
+                    { key: "fraisNotaireAvocat", label: "Frais de notaire / avocat / expert comptable" },
+                  ].map(({ key, label }) => (
+                    <FieldRow key={key} label={label}>
+                      <NumberInput
+                        value={(budget.besoins as unknown as Record<string, number>)[key]}
+                        onChange={(v) => updateBudget({ besoins: { [key]: v } })}
+                        className="w-48"
+                      />
+                    </FieldRow>
+                  ))}
+
+                  <div className="h-px bg-border my-4" />
+                  <p className="text-sm text-muted-foreground mb-3">Autres besoins (non amortissables)</p>
+                  {[
+                    { key: "cautionDepotGarantie", label: "Caution / dépôt de garantie" },
+                    { key: "stockMatieresProduits", label: "Stock initial (matières / produits)" },
+                    { key: "tresorerieDépart", label: "Trésorerie de départ" },
+                  ].map(({ key, label }) => (
+                    <FieldRow key={key} label={label}>
+                      <NumberInput
+                        value={(budget.besoins as unknown as Record<string, number>)[key]}
+                        onChange={(v) => updateBudget({ besoins: { [key]: v } })}
+                        className="w-48"
+                      />
+                    </FieldRow>
+                  ))}
+
+                  <div className="mt-4 p-3 bg-muted rounded-lg flex justify-between items-center">
+                    <span className="font-semibold">Total besoins de démarrage</span>
+                    <span className="text-xl font-bold">{eur(getTotalBesoins(budget))}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- FINANCEMENT ---- */}
+          <TabsContent value="financement">
+            <Card>
+              <CardHeader>
+                <CardTitle>Section 3 — Plan de financement initial</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <FieldRow label="Apport personnel (€)">
+                  <NumberInput
+                    value={budget.financement.apportPersonnel}
+                    onChange={(v) => updateBudget({ financement: { apportPersonnel: v } })}
+                    className="w-48"
+                  />
+                </FieldRow>
+                <FieldRow label="Apports en nature (€)">
+                  <NumberInput
+                    value={budget.financement.apportsNature}
+                    onChange={(v) => updateBudget({ financement: { apportsNature: v } })}
+                    className="w-48"
+                  />
+                </FieldRow>
+
+                <div className="mt-4">
+                  <h3 className="font-semibold mb-2">Apports en compte courant d&apos;associés</h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i}>
+                        <p className="text-xs text-muted-foreground text-center mb-1">Année {i + 1} (€)</p>
+                        <NumberInput
+                          value={budget.financement.apportsComptesCourants[i]}
+                          onChange={(v) => {
+                            const apportsComptesCourants = [...budget.financement.apportsComptesCourants] as [number, number, number];
+                            apportsComptesCourants[i] = v;
+                            updateBudget({ financement: { apportsComptesCourants } });
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold">Emprunts bancaires</h3>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const prets = [...budget.financement.prets, { nom: `Prêt n°${budget.financement.prets.length + 1}`, montant: 0, taux: 0, dureeMois: 0 }];
+                        updateBudget({ financement: { prets } });
+                      }}
+                    >
+                      + Ajouter un emprunt
+                    </Button>
+                  </div>
+                  {budget.financement.prets.map((pret, idx) => (
+                    <div key={idx} className="border rounded-lg p-4 mb-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">Emprunt {idx + 1}</span>
+                        {budget.financement.prets.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive h-7 px-2 text-xs"
+                            onClick={() => {
+                              const prets = budget.financement.prets.filter((_, i) => i !== idx);
+                              updateBudget({ financement: { prets } });
+                            }}
+                          >
+                            Supprimer
+                          </Button>
+                        )}
+                      </div>
+                      <FieldRow label="Nom du prêt">
+                        <Input
+                          value={pret.nom}
+                          onChange={(e) => {
+                            const prets = [...budget.financement.prets];
+                            prets[idx] = { ...prets[idx], nom: e.target.value };
+                            updateBudget({ financement: { prets } });
+                          }}
+                        />
+                      </FieldRow>
+                      <FieldRow label="Montant (€)">
+                        <NumberInput
+                          value={pret.montant}
+                          onChange={(v) => {
+                            const prets = [...budget.financement.prets];
+                            prets[idx] = { ...prets[idx], montant: v };
+                            updateBudget({ financement: { prets } });
+                          }}
+                          className="w-48"
+                        />
+                      </FieldRow>
+                      <FieldRow label="Taux annuel (%)">
+                        <NumberInput
+                          value={pret.taux * 100}
+                          onChange={(v) => {
+                            const prets = [...budget.financement.prets];
+                            prets[idx] = { ...prets[idx], taux: v / 100 };
+                            updateBudget({ financement: { prets } });
+                          }}
+                          className="w-24"
+                          step={0.1}
+                        />
+                      </FieldRow>
+                      <FieldRow label="Durée (mois)">
+                        <NumberInput
+                          value={pret.dureeMois}
+                          onChange={(v) => {
+                            const prets = [...budget.financement.prets];
+                            prets[idx] = { ...prets[idx], dureeMois: v };
+                            updateBudget({ financement: { prets } });
+                          }}
+                          className="w-24"
+                          step={1}
+                        />
+                      </FieldRow>
+                      <div className="flex justify-end pt-2">
+                        <EcheancierDialog pret={pret} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div>
+                  <h3 className="font-semibold mb-2">Subventions d&apos;investissement</h3>
+                  <p className="text-xs text-muted-foreground mb-2">Amorties sur la durée des immobilisations, intégrées au plan de financement</p>
+                  {budget.financement.subventionsInvestissement.map((sub, idx) => (
+                    <div key={idx} className="border rounded-lg p-3 mb-2 space-y-2">
+                      <div className="flex gap-3">
+                        <Input
+                          value={sub.nom}
+                          onChange={(e) => {
+                            const subventionsInvestissement = [...budget.financement.subventionsInvestissement] as BudgetPrevisionnel["financement"]["subventionsInvestissement"];
+                            subventionsInvestissement[idx] = { ...subventionsInvestissement[idx], nom: e.target.value };
+                            updateBudget({ financement: { subventionsInvestissement } });
+                          }}
+                          placeholder="Nom de la subvention"
+                          className="flex-1"
+                        />
+                        <NumberInput
+                          value={sub.montant}
+                          onChange={(v) => {
+                            const subventionsInvestissement = [...budget.financement.subventionsInvestissement] as BudgetPrevisionnel["financement"]["subventionsInvestissement"];
+                            subventionsInvestissement[idx] = { ...subventionsInvestissement[idx], montant: v };
+                            updateBudget({ financement: { subventionsInvestissement } });
+                          }}
+                          className="w-40"
+                          placeholder="Montant (€)"
+                        />
+                        <NumberInput
+                          value={sub.dureeAmortissement}
+                          onChange={(v) => {
+                            const subventionsInvestissement = [...budget.financement.subventionsInvestissement] as BudgetPrevisionnel["financement"]["subventionsInvestissement"];
+                            subventionsInvestissement[idx] = { ...subventionsInvestissement[idx], dureeAmortissement: Math.max(1, v) };
+                            updateBudget({ financement: { subventionsInvestissement } });
+                          }}
+                          className="w-24"
+                          placeholder="Durée"
+                          min={1}
+                          step={1}
+                        />
+                      </div>
+                      <div className="flex gap-3 text-xs text-muted-foreground">
+                        <span className="flex-1"></span>
+                        <span className="w-40 text-right">Montant (€)</span>
+                        <span className="w-24 text-right">Durée (ans)</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div>
+                  <h3 className="font-semibold mb-2">Subventions d&apos;exploitation</h3>
+                  <p className="text-xs text-muted-foreground mb-2">Intégrées directement au résultat, par année</p>
+                  {budget.financement.subventionsExploitation.map((sub, idx) => (
+                    <div key={idx} className="border rounded-lg p-3 mb-2 space-y-2">
+                      <FieldRow label="Nom">
+                        <Input
+                          value={sub.nom}
+                          onChange={(e) => {
+                            const subventionsExploitation = [...budget.financement.subventionsExploitation] as BudgetPrevisionnel["financement"]["subventionsExploitation"];
+                            subventionsExploitation[idx] = { ...subventionsExploitation[idx], nom: e.target.value };
+                            updateBudget({ financement: { subventionsExploitation } });
+                          }}
+                          placeholder="Nom de la subvention"
+                        />
+                      </FieldRow>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[0, 1, 2].map((i) => (
+                          <div key={i}>
+                            <p className="text-xs text-muted-foreground text-center mb-1">Année {i + 1} (€)</p>
+                            <NumberInput
+                              value={sub.montants[i]}
+                              onChange={(v) => {
+                                const subventionsExploitation = [...budget.financement.subventionsExploitation] as BudgetPrevisionnel["financement"]["subventionsExploitation"];
+                                const montants = [...subventionsExploitation[idx].montants] as [number, number, number];
+                                montants[i] = v;
+                                subventionsExploitation[idx] = { ...subventionsExploitation[idx], montants };
+                                updateBudget({ financement: { subventionsExploitation } });
+                              }}
+                              className="w-full"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div>
+                  <h3 className="font-semibold mb-2">Autre financement</h3>
+                  <div className="flex gap-3">
+                    <Input
+                      value={budget.financement.autreFinancement.nom}
+                      onChange={(e) => updateBudget({ financement: { autreFinancement: { ...budget.financement.autreFinancement, nom: e.target.value } } })}
+                      placeholder="Nom"
+                      className="flex-1"
+                    />
+                    <NumberInput
+                      value={budget.financement.autreFinancement.montant}
+                      onChange={(v) => updateBudget({ financement: { autreFinancement: { ...budget.financement.autreFinancement, montant: v } } })}
+                      className="w-40"
+                      placeholder="Montant (€)"
+                    />
+                  </div>
+                </div>
+
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- CHARGES FIXES ---- */}
+          <TabsContent value="charges-fixes">
+            <Card>
+              <CardHeader>
+                <CardTitle>Section 4 — Charges fixes annuelles</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+                  <FieldRow label="Taux d'inflation (%)">
+                    <div className="flex items-center gap-2">
+                      <NumberInput
+                        value={(budget.chargesFixes.tauxInflation ?? 0) * 100}
+                        onChange={(v) => updateBudget({ chargesFixes: { tauxInflation: v / 100 } })}
+                        className="w-24"
+                        step={0.5}
+                        min={0}
+                      />
+                      <span className="text-sm text-muted-foreground">Les années 2 et 3 sont calculées automatiquement</span>
+                    </div>
+                  </FieldRow>
+                </div>
+                {(() => {
+                  const inf = budget.chargesFixes.tauxInflation ?? 0;
+                  const inflate = (v: number, year: number) => year === 0 ? v : Math.round(v * Math.pow(1 + inf, year));
+                  return (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 text-sm font-semibold w-64">Poste de charge</th>
+                      <th className="py-2 text-center text-sm font-semibold w-32">Année 1 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-32">Année 2 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-32">Année 3 (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { key: "assurances", label: "Assurances" },
+                      { key: "telephoneInternet", label: "Téléphone / Internet" },
+                      { key: "autresAbonnements", label: "Autres abonnements" },
+                      { key: "carburantTransports", label: "Carburant et transports" },
+                      { key: "fraisDeplacementHebergement", label: "Frais déplacement / hébergement" },
+                      { key: "eauElectriciteGaz", label: "Eau, électricité, gaz" },
+                      { key: "mutuelle", label: "Mutuelle" },
+                      { key: "fournituresDiverses", label: "Fournitures diverses" },
+                      { key: "entretienMaterielVetements", label: "Entretien matériel / vêtements" },
+                      { key: "nettoyageLocaux", label: "Nettoyage des locaux" },
+                      { key: "budgetPubliciteCommunication", label: "Publicité / communication" },
+                      { key: "loyerChargesLocatives", label: "Loyer et charges locatives" },
+                      { key: "expertComptableAvocats", label: "Expert-comptable / avocats" },
+                      { key: "fraisBancairesTerminalCB", label: "Frais bancaires / terminal CB" },
+                    ].map(({ key, label }) => {
+                      const vals = (budget.chargesFixes as unknown as Record<string, [number, number, number]>)[key];
+                      return (
+                        <tr key={key} className="border-b border-border/40">
+                          <td className="py-1.5 pr-3 text-sm text-muted-foreground">{label}</td>
+                          <td className="py-1 px-1">
+                            <NumberInput
+                              value={vals[0]}
+                              onChange={(v) => {
+                                const next: [number, number, number] = [v, inflate(v, 1), inflate(v, 2)];
+                                updateBudget({ chargesFixes: { [key]: next } });
+                              }}
+                              className="w-full text-right h-8"
+                            />
+                          </td>
+                          <td className="py-1 px-1">
+                            <NumberInput
+                              value={vals[1]}
+                              onChange={(v) => {
+                                const next: [number, number, number] = [vals[0], v, vals[2]];
+                                updateBudget({ chargesFixes: { [key]: next } });
+                              }}
+                              className="w-full text-right h-8"
+                            />
+                          </td>
+                          <td className="py-1 px-1">
+                            <NumberInput
+                              value={vals[2]}
+                              onChange={(v) => {
+                                const next: [number, number, number] = [vals[0], vals[1], v];
+                                updateBudget({ chargesFixes: { [key]: next } });
+                              }}
+                              className="w-full text-right h-8"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Charges personnalisées */}
+                    {(["autreCharge1", "autreCharge2", "autreCharge3"] as const).map((key) => (
+                      <tr key={key} className="border-b border-border/40">
+                        <td className="py-1.5 pr-2">
+                          <Input
+                            value={budget.chargesFixes[key].nom}
+                            onChange={(e) =>
+                              updateBudget({
+                                chargesFixes: {
+                                  [key]: { ...budget.chargesFixes[key], nom: e.target.value },
+                                },
+                              })
+                            }
+                            placeholder="Autre charge..."
+                            className="h-8 text-sm"
+                          />
+                        </td>
+                        {[0, 1, 2].map((i) => (
+                          <td key={i} className="py-1 px-1">
+                            <NumberInput
+                              value={budget.chargesFixes[key].montants[i]}
+                              onChange={(v) => {
+                                const montants = [...budget.chargesFixes[key].montants] as [number, number, number];
+                                if (i === 0) {
+                                  montants[0] = v;
+                                  montants[1] = inflate(v, 1);
+                                  montants[2] = inflate(v, 2);
+                                } else {
+                                  montants[i] = v;
+                                }
+                                updateBudget({
+                                  chargesFixes: {
+                                    [key]: { ...budget.chargesFixes[key], montants },
+                                  },
+                                });
+                              }}
+                              className="w-full text-right h-8"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+
+                    {/* Total */}
+                    <tr className="bg-muted/30 font-semibold">
+                      <td className="py-2 pr-3 text-sm">Total charges fixes</td>
+                      {resultats.chargesExternesParAn.map((ce, i) => (
+                        <td key={i} className="py-2 px-2 text-right text-sm tabular-nums">
+                          {eur(ce)}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- IMPÔTS & TAXES ---- */}
+          <TabsContent value="impots-taxes">
+            <Card>
+              <CardHeader>
+                <CardTitle>Impôts et taxes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+                  <FieldRow label="Taux d'inflation (%)">
+                    <div className="flex items-center gap-2">
+                      <NumberInput
+                        value={(budget.impotsTaxes.tauxInflation ?? 0) * 100}
+                        onChange={(v) => updateBudget({ impotsTaxes: { tauxInflation: v / 100 } })}
+                        className="w-24"
+                        step={0.5}
+                        min={0}
+                      />
+                      <span className="text-sm text-muted-foreground">Les années 2 et 3 sont pré-remplies automatiquement</span>
+                    </div>
+                  </FieldRow>
+                </div>
+                {(() => {
+                  const inf = budget.impotsTaxes.tauxInflation ?? 0;
+                  const inflate = (v: number, year: number) => year === 0 ? v : Math.round(v * Math.pow(1 + inf, year));
+                  return (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 text-sm font-semibold w-64">Poste</th>
+                      <th className="py-2 text-center text-sm font-semibold w-32">Année 1 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-32">Année 2 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-32">Année 3 (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* CFE */}
+                    <tr className="border-b border-border/40">
+                      <td className="py-1.5 pr-3 text-sm text-muted-foreground">CFE (Cotisation Foncière des Entreprises)</td>
+                      <td className="py-1 px-1">
+                        <NumberInput
+                          value={budget.impotsTaxes.cfe[0]}
+                          onChange={(v) => {
+                            const next: [number, number, number] = [v, inflate(v, 1), inflate(v, 2)];
+                            updateBudget({ impotsTaxes: { cfe: next } });
+                          }}
+                          className="w-full text-right h-8"
+                        />
+                      </td>
+                      <td className="py-1 px-1">
+                        <NumberInput
+                          value={budget.impotsTaxes.cfe[1]}
+                          onChange={(v) => {
+                            const next: [number, number, number] = [budget.impotsTaxes.cfe[0], v, budget.impotsTaxes.cfe[2]];
+                            updateBudget({ impotsTaxes: { cfe: next } });
+                          }}
+                          className="w-full text-right h-8"
+                        />
+                      </td>
+                      <td className="py-1 px-1">
+                        <NumberInput
+                          value={budget.impotsTaxes.cfe[2]}
+                          onChange={(v) => {
+                            const next: [number, number, number] = [budget.impotsTaxes.cfe[0], budget.impotsTaxes.cfe[1], v];
+                            updateBudget({ impotsTaxes: { cfe: next } });
+                          }}
+                          className="w-full text-right h-8"
+                        />
+                      </td>
+                    </tr>
+
+                    {/* Lignes libres */}
+                    {(["autreTaxe1", "autreTaxe2", "autreTaxe3"] as const).map((key) => (
+                      <tr key={key} className="border-b border-border/40">
+                        <td className="py-1.5 pr-2">
+                          <Input
+                            value={budget.impotsTaxes[key].nom}
+                            onChange={(e) =>
+                              updateBudget({
+                                impotsTaxes: {
+                                  [key]: { ...budget.impotsTaxes[key], nom: e.target.value },
+                                },
+                              })
+                            }
+                            placeholder="Autre taxe..."
+                            className="h-8 text-sm"
+                          />
+                        </td>
+                        {[0, 1, 2].map((i) => (
+                          <td key={i} className="py-1 px-1">
+                            <NumberInput
+                              value={budget.impotsTaxes[key].montants[i]}
+                              onChange={(v) => {
+                                const montants = [...budget.impotsTaxes[key].montants] as [number, number, number];
+                                if (i === 0) {
+                                  montants[0] = v;
+                                  montants[1] = inflate(v, 1);
+                                  montants[2] = inflate(v, 2);
+                                } else {
+                                  montants[i] = v;
+                                }
+                                updateBudget({
+                                  impotsTaxes: {
+                                    [key]: { ...budget.impotsTaxes[key], montants },
+                                  },
+                                });
+                              }}
+                              className="w-full text-right h-8"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+
+                    {/* Total */}
+                    <tr className="bg-muted/30 font-semibold">
+                      <td className="py-2 pr-3 text-sm">Total impôts et taxes</td>
+                      {resultats.impotsTaxesParAn.map((v, i) => (
+                        <td key={i} className="py-2 px-2 text-right text-sm tabular-nums">
+                          {eur(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- CHIFFRE D'AFFAIRES ---- */}
+          <TabsContent value="chiffre-affaires">
+            <Card>
+              <CardHeader>
+                <CardTitle>Section 5 — Chiffre d&apos;affaires prévisionnel (Année 1)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 w-28">Mois</th>
+                        <th className="text-center py-2 px-1" colSpan={2}>
+                          Marchandises
+                        </th>
+                        <th className="text-center py-2 px-1 border-l" colSpan={2}>
+                          Services
+                        </th>
+                        <th className="text-right py-2 pl-2">CA total</th>
+                      </tr>
+                      <tr className="border-b border-border/50">
+                        <th></th>
+                        <th className="text-center py-1 text-xs font-normal text-muted-foreground px-1">Jours</th>
+                        <th className="text-center py-1 text-xs font-normal text-muted-foreground px-1">€/jour</th>
+                        <th className="text-center py-1 text-xs font-normal text-muted-foreground px-1 border-l">Jours</th>
+                        <th className="text-center py-1 text-xs font-normal text-muted-foreground px-1">€/jour</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {MOIS_LABELS.map((mois, i) => {
+                        const march = budget.chiffreAffaires.marchandises[i];
+                        const serv = budget.chiffreAffaires.services[i];
+                        const total =
+                          march.joursTravailes * march.caMoyenParJour +
+                          serv.joursTravailes * serv.caMoyenParJour;
+                        return (
+                          <tr key={i} className="border-b border-border/30">
+                            <td className="py-1 pr-2 text-muted-foreground">{mois}</td>
+                            <td className="py-1 px-1">
+                              <NumberInput
+                                value={march.joursTravailes}
+                                onChange={(v) => {
+                                  const marchandises = [...budget.chiffreAffaires.marchandises];
+                                  marchandises[i] = { ...marchandises[i], joursTravailes: v };
+                                  updateBudget({ chiffreAffaires: { marchandises } });
+                                }}
+                                className="w-16 h-7 text-center"
+                              />
+                            </td>
+                            <td className="py-1 px-1">
+                              <NumberInput
+                                value={march.caMoyenParJour}
+                                onChange={(v) => {
+                                  const marchandises = [...budget.chiffreAffaires.marchandises];
+                                  marchandises[i] = { ...marchandises[i], caMoyenParJour: v };
+                                  for (let j = i + 1; j < 12; j++) {
+                                    marchandises[j] = { ...marchandises[j], caMoyenParJour: v };
+                                  }
+                                  updateBudget({ chiffreAffaires: { marchandises } });
+                                }}
+                                className="w-24 h-7 text-right"
+                              />
+                            </td>
+                            <td className="py-1 px-1 border-l">
+                              <NumberInput
+                                value={serv.joursTravailes}
+                                onChange={(v) => {
+                                  const services = [...budget.chiffreAffaires.services];
+                                  services[i] = { ...services[i], joursTravailes: v };
+                                  updateBudget({ chiffreAffaires: { services } });
+                                }}
+                                className="w-16 h-7 text-center"
+                              />
+                            </td>
+                            <td className="py-1 px-1">
+                              <NumberInput
+                                value={serv.caMoyenParJour}
+                                onChange={(v) => {
+                                  const services = [...budget.chiffreAffaires.services];
+                                  services[i] = { ...services[i], caMoyenParJour: v };
+                                  for (let j = i + 1; j < 12; j++) {
+                                    services[j] = { ...services[j], caMoyenParJour: v };
+                                  }
+                                  updateBudget({ chiffreAffaires: { services } });
+                                }}
+                                className="w-24 h-7 text-right"
+                              />
+                            </td>
+                            <td className="py-1 pl-2 text-right tabular-nums font-medium">
+                              {eur(total)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      <tr className="bg-muted/30 font-semibold">
+                        <td className="py-2" colSpan={5}>Total Année 1</td>
+                        <td className="py-2 text-right tabular-nums">{eur(resultats.caTotalParAn[0])}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-6 grid grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="font-semibold mb-3 text-sm">Progression marchandises</h3>
+                    <div className="space-y-2">
+                      <FieldRow label="Augmentation An 2 (%)">
+                        <NumberInput
+                          value={budget.chiffreAffaires.augmentationAn2Marchandises * 100}
+                          onChange={(v) => updateBudget({ chiffreAffaires: { augmentationAn2Marchandises: v / 100 } })}
+                          className="w-24"
+                          step={1}
+                        />
+                      </FieldRow>
+                      <FieldRow label="Augmentation An 3 (%)">
+                        <NumberInput
+                          value={budget.chiffreAffaires.augmentationAn3Marchandises * 100}
+                          onChange={(v) => updateBudget({ chiffreAffaires: { augmentationAn3Marchandises: v / 100 } })}
+                          className="w-24"
+                          step={1}
+                        />
+                      </FieldRow>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold mb-3 text-sm">Progression services</h3>
+                    <div className="space-y-2">
+                      <FieldRow label="Augmentation An 2 (%)">
+                        <NumberInput
+                          value={budget.chiffreAffaires.augmentationAn2Services * 100}
+                          onChange={(v) => updateBudget({ chiffreAffaires: { augmentationAn2Services: v / 100 } })}
+                          className="w-24"
+                          step={1}
+                        />
+                      </FieldRow>
+                      <FieldRow label="Augmentation An 3 (%)">
+                        <NumberInput
+                          value={budget.chiffreAffaires.augmentationAn3Services * 100}
+                          onChange={(v) => updateBudget({ chiffreAffaires: { augmentationAn3Services: v / 100 } })}
+                          className="w-24"
+                          step={1}
+                        />
+                      </FieldRow>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-px bg-border my-4" />
+                <p className="text-sm text-muted-foreground mb-3">Charges variables</p>
+                <FieldRow label="Coût d'achat marchandises (%)">
+                  <div className="flex items-center gap-2">
+                    <NumberInput
+                      value={budget.chargesVariables.coutAchatMarchandisesPct * 100}
+                      onChange={(v) => updateBudget({ chargesVariables: { coutAchatMarchandisesPct: v / 100 } })}
+                      className="w-24"
+                      step={1}
+                      min={0}
+                    />
+                    <span className="text-sm text-muted-foreground">% du CA marchandises</span>
+                  </div>
+                </FieldRow>
+
+                <div className="mt-4 p-3 bg-muted rounded-lg">
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i}>
+                        <p className="text-xs text-muted-foreground">Année {i + 1}</p>
+                        <p className="text-lg font-bold">{eur(resultats.caTotalParAn[i])}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- SALAIRES ---- */}
+          <TabsContent value="salaires">
+            <Card>
+              <CardHeader>
+                <CardTitle>Section 8 — Salaires et rémunérations</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 text-sm font-semibold w-64">Poste</th>
+                      <th className="py-2 text-center text-sm font-semibold w-36">Année 1 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-36">Année 2 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-36">Année 3 (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <ThreeYearRow
+                      label="Salaires employés (net)"
+                      values={budget.salaires.salairesEmployesNet}
+                      onChange={(vals) => updateBudget({ salaires: { salairesEmployesNet: vals } })}
+                    />
+                    <tr className="border-b border-border/20">
+                      <td className="py-1 pr-3 text-xs text-muted-foreground pl-4">
+                        → Charges sociales employés (estimées à 80%)
+                      </td>
+                      {resultats.chargesSocialesEmployesParAn.map((v, i) => (
+                        <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">
+                          {eur(v)}
+                        </td>
+                      ))}
+                    </tr>
+                    <ThreeYearRow
+                      label="Rémunération dirigeant (net)"
+                      values={budget.salaires.remunerationDirigeant}
+                      onChange={(vals) => updateBudget({ salaires: { remunerationDirigeant: vals } })}
+                    />
+                    <tr className="border-b border-border/20">
+                      <td className="py-1 pr-3 text-xs text-muted-foreground pl-4">
+                        → Charges sociales dirigeant (selon statut{budget.infos.acre ? " + ACRE" : ""})
+                      </td>
+                      {resultats.chargesSocialesDirigeantParAn.map((v, i) => (
+                        <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">
+                          {eur(v)}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="bg-muted/30 font-semibold">
+                      <td className="py-2 pr-3 text-sm">Total masse salariale chargée</td>
+                      {[0, 1, 2].map((i) => (
+                        <td key={i} className="py-2 px-2 text-right text-sm tabular-nums">
+                          {eur(
+                            resultats.salairesEmployesParAn[i] +
+                            resultats.chargesSocialesEmployesParAn[i] +
+                            resultats.remunerationDirigeantParAn[i] +
+                            resultats.chargesSocialesDirigeantParAn[i]
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div className="mt-4 p-3 bg-muted/20 border rounded-lg text-sm">
+                  <p className="font-medium mb-1">Statut : {budget.infos.statutJuridique}</p>
+                  <p className="text-muted-foreground">
+                    {budget.infos.acre
+                      ? "ACRE active : taux de charges réduit la 1ère année."
+                      : "Pas d'ACRE. Cochez la case dans les informations générales si applicable."}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- DIVERS ---- */}
+          <TabsContent value="divers">
+            <Card>
+              <CardHeader>
+                <CardTitle>Divers</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 text-sm font-semibold w-64"></th>
+                      <th className="py-2 text-center text-sm font-semibold w-36">Année 1 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-36">Année 2 (€)</th>
+                      <th className="py-2 text-center text-sm font-semibold w-36">Année 3 (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {([
+                      { key: "dividendes" as const, label: "Distribution de dividendes", hint: "Plan de financement et trésorerie uniquement" },
+                      { key: "remboursementsComptesCourants" as const, label: "Remboursements compte courant associés", hint: "Plan de financement et trésorerie uniquement" },
+                      { key: "cessionsImmobilisations" as const, label: "Cessions d'immobilisations", hint: "Rentre dans le résultat" },
+                      { key: "indemnitesARecevoir" as const, label: "Indemnités diverses à recevoir", hint: "Rentre dans le résultat" },
+                      { key: "indemnitesAPayer" as const, label: "Indemnités diverses à payer", hint: "Rentre dans le résultat (en moins)" },
+                    ]).map(({ key, label, hint }) => (
+                      <tr key={key} className="border-b border-border/40">
+                        <td className="py-1.5 pr-3">
+                          <p className="text-sm">{label}</p>
+                          <p className="text-xs text-muted-foreground">{hint}</p>
+                        </td>
+                        {[0, 1, 2].map((i) => (
+                          <td key={i} className="py-1 px-1">
+                            <NumberInput
+                              value={budget.divers[key][i]}
+                              onChange={(v) => {
+                                const arr = [...budget.divers[key]] as [number, number, number];
+                                arr[i] = v;
+                                updateBudget({ divers: { [key]: arr } });
+                              }}
+                              className="w-full text-right h-8"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---- RÉSULTATS ---- */}
+          <TabsContent value="resultats">
+            <div className="space-y-6">
+              {/* Dashboard indicateurs + graphique trésorerie */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card className={`border-2 ${resultats.estRentable ? "border-green-500" : "border-destructive"}`}>
+                  <CardContent className="pt-4 pb-3 text-center">
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                      {resultats.estRentable ? (
+                        <TrendingUp className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <TrendingDown className="h-5 w-5 text-destructive" />
+                      )}
+                      <span className="text-xs font-medium text-muted-foreground">Rentabilité An 1</span>
+                    </div>
+                    <p className={`text-lg font-bold ${resultats.estRentable ? "text-green-600" : "text-destructive"}`}>
+                      {resultats.estRentable ? "Rentable" : "Déficitaire"}
+                    </p>
+                    <p className="text-sm tabular-nums">{eur(resultats.resultatNetParAn[0])}</p>
+                  </CardContent>
+                </Card>
+
+                <Card className={`border-2 ${resultats.tresorerieAdequate ? "border-green-500" : "border-orange-400"}`}>
+                  <CardContent className="pt-4 pb-3 text-center">
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                      {resultats.tresorerieAdequate ? (
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <AlertTriangle className="h-5 w-5 text-orange-500" />
+                      )}
+                      <span className="text-xs font-medium text-muted-foreground">Trésorerie An 1</span>
+                    </div>
+                    <p className={`text-lg font-bold ${resultats.tresorerieAdequate ? "text-green-600" : "text-orange-500"}`}>
+                      {resultats.tresorerieAdequate ? "Positive" : "Risque"}
+                    </p>
+                    <p className="text-sm tabular-nums">
+                      Min : {eur(Math.min(...resultats.tresorerieMensuelle))}
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4 pb-3 text-center">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">CAF An 1</p>
+                    <p className={`text-lg font-bold ${resultats.capaciteAutofinancementParAn[0] < 0 ? "text-destructive" : ""}`}>
+                      {eur(resultats.capaciteAutofinancementParAn[0])}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Capacité d&apos;autofinancement</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-4 pb-3 text-center">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">BFR An 1</p>
+                    <p className={`text-lg font-bold ${resultats.bfrParAn[0] > 0 ? "text-destructive" : "text-green-600"}`}>
+                      {eur(resultats.bfrParAn[0])}
+                    </p>
+                    <p className="text-sm text-muted-foreground">Besoin en fonds de roulement</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Graphique trésorerie mensuelle (dashboard) */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Trésorerie mensuelle — Année 1</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={tresoChartData} margin={{ top: 5, right: 10, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                      <XAxis dataKey="mois" tick={{ fontSize: 12 }} />
+                      <YAxis
+                        tick={{ fontSize: 11 }}
+                        tickFormatter={(v: number) =>
+                          new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 0 }).format(v)
+                        }
+                      />
+                      <Tooltip
+                        formatter={(value: number) => [eur(value), "Trésorerie cumulée"]}
+                        labelStyle={{ fontWeight: 600 }}
+                      />
+                      <ReferenceLine y={0} stroke="hsl(var(--destructive))" strokeWidth={2} />
+                      <Bar
+                        dataKey="tresorerie"
+                        radius={[3, 3, 0, 0]}
+                        fill="hsl(var(--primary))"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              {/* Compte de résultat */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Compte de résultat prévisionnel</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 text-sm font-semibold"></th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 1</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 2</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 3</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <ResultRow label="CA Marchandises" values={resultats.caMarhandisesParAn} />
+                      <ResultRow label="CA Services" values={resultats.caServicesParAn} />
+                      <ResultRow label="CA Total" values={resultats.caTotalParAn} bold />
+                      <ResultRow label="— Achats consommés" values={resultats.achatsConsommesParAn} />
+                      <ResultRow label="= Marge brute" values={resultats.margeBruteParAn} bold />
+                      <tr className={`border-b border-border/30 cursor-pointer hover:bg-muted/10`} onClick={() => setExpandChargesExternes(!expandChargesExternes)}>
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {expandChargesExternes ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          — Charges externes
+                        </td>
+                        {resultats.chargesExternesParAn.map((v, i) => (
+                          <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>
+                        ))}
+                      </tr>
+                      {expandChargesExternes && (() => {
+                        const inf = budget.chargesFixes.tauxInflation ?? 0;
+                        const chargesKeys = [
+                          { key: "assurances", label: "Assurances" },
+                          { key: "telephoneInternet", label: "Téléphone / Internet" },
+                          { key: "autresAbonnements", label: "Autres abonnements" },
+                          { key: "carburantTransports", label: "Carburant / Transports" },
+                          { key: "fraisDeplacementHebergement", label: "Déplacements / Hébergement" },
+                          { key: "eauElectriciteGaz", label: "Eau / Électricité / Gaz" },
+                          { key: "mutuelle", label: "Mutuelle" },
+                          { key: "fournituresDiverses", label: "Fournitures diverses" },
+                          { key: "entretienMaterielVetements", label: "Entretien / Vêtements" },
+                          { key: "nettoyageLocaux", label: "Nettoyage locaux" },
+                          { key: "budgetPubliciteCommunication", label: "Publicité / Communication" },
+                          { key: "loyerChargesLocatives", label: "Loyer / Charges locatives" },
+                          { key: "expertComptableAvocats", label: "Expert-comptable / Avocats" },
+                          { key: "fraisBancairesTerminalCB", label: "Frais bancaires / CB" },
+                        ];
+                        return chargesKeys.map(({ key, label }) => {
+                          const vals = (budget.chargesFixes as unknown as Record<string, [number, number, number]>)[key];
+                          const inflated: [number, number, number] = [vals[0], vals[1], vals[2]];
+                          if (inflated[0] === 0 && inflated[1] === 0 && inflated[2] === 0) return null;
+                          return (
+                            <tr key={key} className="border-b border-border/20">
+                              <td className="py-1 pl-8 pr-3 text-xs text-muted-foreground">{label}</td>
+                              {inflated.map((v, i) => (
+                                <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">{eur(v)}</td>
+                              ))}
+                            </tr>
+                          );
+                        });
+                      })()}
+                      <ResultRow label="= Valeur ajoutée" values={resultats.valeurAjouteeParAn} bold />
+                      <ResultRow label="— Impôts et taxes" values={resultats.impotsTaxesParAn} />
+                      <ResultRow label="— Salaires employés (net)" values={resultats.salairesEmployesParAn} />
+                      <ResultRow label="— Charges sociales employés" values={resultats.chargesSocialesEmployesParAn} />
+                      <ResultRow label="— Rémunération dirigeant" values={resultats.remunerationDirigeantParAn} />
+                      <ResultRow label="— Charges sociales dirigeant" values={resultats.chargesSocialesDirigeantParAn} />
+                      <ResultRow label="= EBE" values={resultats.ebeParAn} bold />
+                      <ResultRow label="— Dotations amortissements" values={resultats.dotationsAmortissementsParAn} />
+                      <ResultRow label="= Résultat d'exploitation" values={resultats.resultatExploitationParAn} bold />
+                      <ResultRow label="— Charges financières" values={resultats.chargesFinancieresParAn} />
+                      <ResultRow label="+ Quote-part subventions invest. virée au résultat" values={resultats.repriseSubventionsInvestParAn} />
+                      <ResultRow label="+ Subventions d'exploitation" values={resultats.subventionsExploitationParAn} />
+                      <ResultRow label="= Résultat courant" values={resultats.resultatCourantParAn} bold />
+                      <ResultRow label="+ Produits divers (cessions, indemnités à recevoir)" values={resultats.produitsDiversParAn} />
+                      <ResultRow label="— Charges diverses (indemnités à payer)" values={resultats.chargesDiversesParAn} />
+                      <ResultRow label="= Résultat net" values={resultats.resultatNetParAn} bold />
+                      <ResultRow label="Capacité d'autofinancement (CAF)" values={resultats.capaciteAutofinancementParAn} bold />
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+
+              {/* Plan de financement détaillé */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Plan de financement</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 text-sm font-semibold"></th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 1</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 2</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 3</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* EMPLOIS */}
+                      <tr className="bg-muted/30">
+                        <td colSpan={4} className="py-2 px-2 text-sm font-bold">EMPLOIS</td>
+                      </tr>
+                      <tr className="border-b border-border/30 cursor-pointer hover:bg-muted/10" onClick={() => setExpandInvestissements(!expandInvestissements)}>
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {expandInvestissements ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          Investissements
+                        </td>
+                        {[resultats.totalBesoins, 0, 0].map((v, i) => (
+                          <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v > 0 ? eur(v) : ""}</td>
+                        ))}
+                      </tr>
+                      {expandInvestissements && (
+                        <>
+                          <ResultRow label="    Immobilisations amortissables" values={[resultats.totalImmobilisationsAmortissables, 0, 0]} />
+                          {budget.besoins.terrain > 0 && <ResultRow label="    Terrain" values={[budget.besoins.terrain, 0, 0]} />}
+                          {budget.besoins.fraisDossier > 0 && <ResultRow label="    Frais de dossier" values={[budget.besoins.fraisDossier, 0, 0]} />}
+                          {budget.besoins.fraisNotaireAvocat > 0 && <ResultRow label="    Frais notaire / avocat" values={[budget.besoins.fraisNotaireAvocat, 0, 0]} />}
+                          {budget.besoins.cautionDepotGarantie > 0 && <ResultRow label="    Caution / dépôt de garantie" values={[budget.besoins.cautionDepotGarantie, 0, 0]} />}
+                          {budget.besoins.stockMatieresProduits > 0 && <ResultRow label="    Stock initial" values={[budget.besoins.stockMatieresProduits, 0, 0]} />}
+                          {budget.besoins.tresorerieDépart > 0 && <ResultRow label="    Trésorerie de départ" values={[budget.besoins.tresorerieDépart, 0, 0]} />}
+                        </>
+                      )}
+                      <ResultRow label="Variation BFR" values={resultats.variationBfrParAn} />
+                      <ResultRow label="Remboursements emprunts" values={resultats.remboursementsEmpruntParAn} />
+                      <ResultRow label="Dividendes" values={budget.divers.dividendes} />
+                      <ResultRow label="Remboursements compte courant" values={budget.divers.remboursementsComptesCourants} />
+                      <ResultRow label="Total emplois" values={[
+                        resultats.totalBesoins + resultats.variationBfrParAn[0] + resultats.remboursementsEmpruntParAn[0]
+                          + budget.divers.dividendes[0] + budget.divers.remboursementsComptesCourants[0],
+                        resultats.variationBfrParAn[1] + resultats.remboursementsEmpruntParAn[1]
+                          + budget.divers.dividendes[1] + budget.divers.remboursementsComptesCourants[1],
+                        resultats.variationBfrParAn[2] + resultats.remboursementsEmpruntParAn[2]
+                          + budget.divers.dividendes[2] + budget.divers.remboursementsComptesCourants[2],
+                      ]} bold />
+
+                      {/* RESSOURCES */}
+                      <tr className="bg-muted/30">
+                        <td colSpan={4} className="py-2 px-2 text-sm font-bold">RESSOURCES</td>
+                      </tr>
+                      <tr className="border-b border-border/30 cursor-pointer hover:bg-muted/10" onClick={() => setExpandFinancements(!expandFinancements)}>
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {expandFinancements ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          Financements
+                        </td>
+                        {[resultats.totalRessources, 0, 0].map((v, i) => (
+                          <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v > 0 ? eur(v) : ""}</td>
+                        ))}
+                      </tr>
+                      {expandFinancements && (
+                        <>
+                          {budget.financement.apportPersonnel > 0 && <ResultRow label="    Apport personnel" values={[budget.financement.apportPersonnel, 0, 0]} />}
+                          {budget.financement.apportsNature > 0 && <ResultRow label="    Apports en nature" values={[budget.financement.apportsNature, 0, 0]} />}
+                          {budget.financement.prets.map((p, i) =>
+                            p.montant > 0 ? (
+                              <ResultRow key={i} label={`    ${p.nom || `Prêt ${i + 1}`}`} values={[p.montant, 0, 0]} />
+                            ) : null
+                          )}
+                          {budget.financement.subventionsInvestissement.map((sub, i) =>
+                            sub.montant > 0 ? (
+                              <ResultRow key={`si${i}`} label={`    ${sub.nom}`} values={[sub.montant, 0, 0]} />
+                            ) : null
+                          )}
+                          {budget.financement.autreFinancement.montant > 0 && (
+                            <ResultRow label={`    ${budget.financement.autreFinancement.nom}`} values={[budget.financement.autreFinancement.montant, 0, 0]} />
+                          )}
+                        </>
+                      )}
+                      <ResultRow label="Apports compte courant" values={budget.financement.apportsComptesCourants} />
+                      <ResultRow label="CAF" values={resultats.capaciteAutofinancementParAn} />
+                      <ResultRow label="Total ressources" values={[
+                        resultats.totalRessources + resultats.capaciteAutofinancementParAn[0],
+                        resultats.capaciteAutofinancementParAn[1] + budget.financement.apportsComptesCourants[1],
+                        resultats.capaciteAutofinancementParAn[2] + budget.financement.apportsComptesCourants[2],
+                      ]} bold />
+
+                      {/* SOLDE */}
+                      <tr className="bg-muted/30">
+                        <td colSpan={4} className="py-2 px-2 text-sm font-bold">SOLDE</td>
+                      </tr>
+                      <ResultRow label="Variation de trésorerie" values={resultats.variationTresorerieParAn} />
+                      <ResultRow label="Trésorerie cumulée" values={resultats.excedentTresorerieParAn} bold />
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+
+              {/* BFR détaillé */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Besoin en fonds de roulement (BFR)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 text-sm font-semibold"></th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 1</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 2</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 3</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <ResultRow label="CA Total" values={resultats.caTotalParAn} />
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm text-muted-foreground">Délai clients</td>
+                        <td colSpan={3} className="py-1.5 px-2 text-right text-sm">{budget.bfr.delaiClientsJours} jours</td>
+                      </tr>
+                      <ResultRow label="Créances clients" values={resultats.creancesClientsParAn} />
+                      <ResultRow label="Achats consommés" values={resultats.achatsConsommesParAn} />
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm text-muted-foreground">Délai fournisseurs</td>
+                        <td colSpan={3} className="py-1.5 px-2 text-right text-sm">{budget.bfr.delaiFournisseursJours} jours</td>
+                      </tr>
+                      <ResultRow label="Dettes fournisseurs" values={resultats.dettesFournisseursParAn} />
+                      <ResultRow label="BFR (créances − dettes)" values={resultats.bfrParAn} bold />
+                      <ResultRow label="Variation du BFR" values={resultats.variationBfrParAn} bold />
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+
+              {/* Trésorerie mensuelle détaillée */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Trésorerie mensuelle détaillée — Année 1</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left py-1 pr-2 font-semibold min-w-[160px]"></th>
+                          {MOIS_LABELS.map((m) => (
+                            <th key={m} className="py-1 text-right text-xs font-medium min-w-[70px]">
+                              {m.slice(0, 3)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* Encaissements dépliable */}
+                        <tr className="border-b border-border/30 bg-green-50 dark:bg-green-950/20 cursor-pointer" onClick={() => setExpandEncaissements(!expandEncaissements)}>
+                          <td className="py-1 pr-2 font-medium text-green-700 dark:text-green-400 flex items-center gap-1">
+                            {expandEncaissements ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            Encaissements (CA)
+                          </td>
+                          {resultats.tresorerieMensuelleDetail.encaissements.map((v, i) => (
+                            <td key={i} className="py-1 text-right tabular-nums text-xs font-medium text-green-700 dark:text-green-400">{eur(v)}</td>
+                          ))}
+                        </tr>
+                        {expandEncaissements && (
+                          <>
+                            <tr className="border-b border-border/20">
+                              <td className="py-0.5 pl-6 pr-2 text-xs text-muted-foreground">CA Marchandises</td>
+                              {budget.chiffreAffaires.marchandises.map((m, i) => (
+                                <td key={i} className="py-0.5 text-right tabular-nums text-xs text-muted-foreground">{eur(m.joursTravailes * m.caMoyenParJour)}</td>
+                              ))}
+                            </tr>
+                            <tr className="border-b border-border/20">
+                              <td className="py-0.5 pl-6 pr-2 text-xs text-muted-foreground">CA Services</td>
+                              {budget.chiffreAffaires.services.map((s, i) => (
+                                <td key={i} className="py-0.5 text-right tabular-nums text-xs text-muted-foreground">{eur(s.joursTravailes * s.caMoyenParJour)}</td>
+                              ))}
+                            </tr>
+                          </>
+                        )}
+
+                        {/* Total Dépenses dépliable */}
+                        <tr className="border-b border-border/30 bg-red-50 dark:bg-red-950/20 cursor-pointer" onClick={() => setExpandDepenses(!expandDepenses)}>
+                          <td className="py-1 pr-2 font-medium text-red-700 dark:text-red-400 flex items-center gap-1">
+                            {expandDepenses ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            Total Dépenses
+                          </td>
+                          {resultats.tresorerieMensuelleDetail.achats.map((_, i) => {
+                            const total = resultats.tresorerieMensuelleDetail.achats[i]
+                              + resultats.tresorerieMensuelleDetail.chargesFixes[i]
+                              + resultats.tresorerieMensuelleDetail.salaires[i]
+                              + resultats.tresorerieMensuelleDetail.remboursements[i];
+                            return <td key={i} className="py-1 text-right tabular-nums text-xs font-medium text-red-700 dark:text-red-400">{eur(total)}</td>;
+                          })}
+                        </tr>
+                        {expandDepenses && (
+                          <>
+                            <tr className="border-b border-border/20">
+                              <td className="py-0.5 pl-6 pr-2 text-xs text-muted-foreground">Achats consommés</td>
+                              {resultats.tresorerieMensuelleDetail.achats.map((v, i) => (
+                                <td key={i} className="py-0.5 text-right tabular-nums text-xs text-muted-foreground">{eur(v)}</td>
+                              ))}
+                            </tr>
+                            <tr className="border-b border-border/20">
+                              <td className="py-0.5 pl-6 pr-2 text-xs text-muted-foreground">Charges fixes</td>
+                              {resultats.tresorerieMensuelleDetail.chargesFixes.map((v, i) => (
+                                <td key={i} className="py-0.5 text-right tabular-nums text-xs text-muted-foreground">{eur(v)}</td>
+                              ))}
+                            </tr>
+                            <tr className="border-b border-border/20">
+                              <td className="py-0.5 pl-6 pr-2 text-xs text-muted-foreground">Salaires et charges</td>
+                              {resultats.tresorerieMensuelleDetail.salaires.map((v, i) => (
+                                <td key={i} className="py-0.5 text-right tabular-nums text-xs text-muted-foreground">{eur(v)}</td>
+                              ))}
+                            </tr>
+                            <tr className="border-b border-border/20">
+                              <td className="py-0.5 pl-6 pr-2 text-xs text-muted-foreground">Remboursements emprunts</td>
+                              {resultats.tresorerieMensuelleDetail.remboursements.map((v, i) => (
+                                <td key={i} className="py-0.5 text-right tabular-nums text-xs text-muted-foreground">{eur(v)}</td>
+                              ))}
+                            </tr>
+                          </>
+                        )}
+
+                        <tr className="border-b border-border/40 font-medium">
+                          <td className="py-1 pr-2">Solde du mois</td>
+                          {resultats.tresorerieMensuelleDetail.soldeMensuel.map((v, i) => (
+                            <td key={i} className={`py-1 text-right tabular-nums text-xs ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>
+                          ))}
+                        </tr>
+                        <tr className="font-bold bg-muted/30">
+                          <td className="py-1.5 pr-2">Trésorerie cumulée</td>
+                          {resultats.tresorerieMensuelleDetail.tresorerieCumulee.map((v, i) => (
+                            <td key={i} className={`py-1.5 text-right tabular-nums text-xs ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Seuil de rentabilité (à la fin) */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Seuil de rentabilité</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 text-sm font-semibold"></th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 1</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 2</th>
+                        <th className="py-2 text-right text-sm font-semibold">Année 3</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <ResultRow label="Seuil de rentabilité (€)" values={resultats.seuilRentabiliteParAn} bold />
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">Point mort (jours)</td>
+                        {resultats.pointMortJoursParAn.map((v, i) => (
+                          <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v} j</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">CA réalisé</td>
+                        {resultats.caTotalParAn.map((v, i) => (
+                          <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v >= resultats.seuilRentabiliteParAn[i] ? "text-green-600" : "text-destructive"}`}>
+                            {eur(v)}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 pr-3 text-sm">Marge de sécurité</td>
+                        {resultats.caTotalParAn.map((v, i) => {
+                          const marge = v - resultats.seuilRentabiliteParAn[i];
+                          return (
+                            <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums font-medium ${marge >= 0 ? "text-green-600" : "text-destructive"}`}>
+                              {eur(marge)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
+    </div>
+  );
+}
