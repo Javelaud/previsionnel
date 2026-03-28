@@ -21,8 +21,9 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import { BudgetPrevisionnel, BalanceNmoins1 } from "@/data/previsionnel/types";
+import { BudgetPrevisionnel, BalanceNmoins1, LigneBalanceDetail } from "@/data/previsionnel/types";
 import { parseFec } from "@/data/previsionnel/fec-parser";
+import { parseBalanceXlsx } from "@/data/previsionnel/balance-parser";
 import { getClient, getBudgetsForClient, createNewBudget, saveBudget } from "@/data/previsionnel/storage";
 import {
   calculerPrevisionnel,
@@ -274,6 +275,14 @@ export default function Page() {
   const [expandEncaissements, setExpandEncaissements] = useState(false);
   const [expandDepenses, setExpandDepenses] = useState(false);
   const [expandChargesExternes, setExpandChargesExternes] = useState(false);
+  const [expandN1CA, setExpandN1CA] = useState(false);
+  const [expandN1Serv, setExpandN1Serv] = useState(false);
+  const [expandN1Achats, setExpandN1Achats] = useState(false);
+  const [expandN1Personnel, setExpandN1Personnel] = useState(false);
+  const [expandN1Dotations, setExpandN1Dotations] = useState(false);
+  const [expandN1Financieres, setExpandN1Financieres] = useState(false);
+  const [expandN1AutresProduits, setExpandN1AutresProduits] = useState(false);
+  const [expandN1AutresCharges, setExpandN1AutresCharges] = useState(false);
   const [fecImportStatus, setFecImportStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [fecImportMessage, setFecImportMessage] = useState<string>("");
 
@@ -527,26 +536,36 @@ export default function Page() {
                   ) : (
                     <label className="flex items-center gap-2 cursor-pointer rounded-md border border-dashed border-border px-3 py-3 hover:bg-muted/20 transition-colors">
                       <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm text-muted-foreground">
-                        {fecImportStatus === "loading" ? "Import en cours…" : "Importer un fichier FEC (.txt)"}
-                      </span>
+                      <div className="flex-1">
+                        <span className="text-sm text-muted-foreground">
+                          {fecImportStatus === "loading" ? "Import en cours…" : "Importer une balance (.xlsx) ou un FEC (.txt)"}
+                        </span>
+                        <p className="text-xs text-muted-foreground">Format privilégié : balance comptable Excel (Sage, Cegid, EBP…)</p>
+                      </div>
                       <input
                         type="file"
-                        accept=".txt,.csv,.fec"
+                        accept=".xlsx,.xls,.txt,.csv,.fec"
                         className="hidden"
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (!file) return;
                           setFecImportStatus("loading");
                           try {
-                            const text = await file.text();
-                            const balance: BalanceNmoins1 = parseFec(text);
+                            let balance: BalanceNmoins1;
+                            const isXlsx = file.name.match(/\.(xlsx|xls)$/i);
+                            if (isXlsx) {
+                              const buf = await file.arrayBuffer();
+                              balance = await parseBalanceXlsx(buf);
+                            } else {
+                              const text = await file.text();
+                              balance = parseFec(text);
+                            }
                             updateBudget({ balanceNmoins1: balance });
                             setFecImportStatus("success");
-                            setFecImportMessage(`Importé avec succès (${Object.keys(balance).length} postes)`);
-                          } catch {
+                            setFecImportMessage("OK");
+                          } catch (err) {
                             setFecImportStatus("error");
-                            setFecImportMessage("Erreur lors de la lecture du fichier FEC.");
+                            setFecImportMessage("Erreur lors de la lecture du fichier : " + String(err));
                           }
                           e.target.value = "";
                         }}
@@ -1672,6 +1691,17 @@ export default function Page() {
                 <CardContent>
                   {(() => {
                     const cr = budget.balanceNmoins1?.compteResultat;
+                    const dl = budget.balanceNmoins1?.detailLignes;
+                    // Listes de détail N-1 par catégorie
+                    const caMarchDetail = dl?.ca?.filter(l => ['701','702','703','707'].some(p => l.compte.startsWith(p))) ?? [];
+                    const caServDetail  = dl?.ca?.filter(l => ['704','705','706','708'].some(p => l.compte.startsWith(p))) ?? [];
+                    const achatsDetail         = dl?.achats ?? [];
+                    const chargesExternesDetail = dl?.chargesExternes ?? [];
+                    const personnelDetail      = dl?.chargesPersonnel ?? [];
+                    const dotationsDetail      = dl?.dotations ?? [];
+                    const financieresDetail    = dl?.chargesFinancieres ?? [];
+                    const autresProduitsDetail = dl?.autresProduits ?? [];
+                    const autresChargesDetail  = dl?.autresCharges ?? [];
                     // Colonne N-1 optionnelle
                     const N1Cell = ({ value }: { value: number }) => cr ? (
                       <td className="py-1.5 px-2 text-right text-sm tabular-nums text-muted-foreground italic">
@@ -1690,32 +1720,83 @@ export default function Page() {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr className="border-b border-border/30">
-                        <td className="py-1.5 pr-3 text-sm">CA Marchandises</td>
+                      {/* CA Marchandises */}
+                      <tr
+                        className={`border-b border-border/30${caMarchDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (caMarchDetail.length) setExpandN1CA(!expandN1CA); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {caMarchDetail.length > 0 && (expandN1CA ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          CA Marchandises
+                        </td>
                         <N1Cell value={cr?.caMarchandises ?? 0} />
                         {resultats.caMarhandisesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
-                      <tr className="border-b border-border/30">
-                        <td className="py-1.5 pr-3 text-sm">CA Services</td>
+                      {expandN1CA && caMarchDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/20 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* CA Services */}
+                      <tr
+                        className={`border-b border-border/30${caServDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (caServDetail.length) setExpandN1Serv(!expandN1Serv); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {caServDetail.length > 0 && (expandN1Serv ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          CA Services
+                        </td>
                         <N1Cell value={cr?.caServices ?? 0} />
                         {resultats.caServicesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
+                      {expandN1Serv && caServDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/20 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* CA Total */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/10">
                         <td className="py-1.5 pr-3 text-sm">CA Total</td>
                         <N1Cell value={cr?.caTotal ?? 0} />
                         {resultats.caTotalParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
-                      <tr className="border-b border-border/30">
-                        <td className="py-1.5 pr-3 text-sm">— Achats consommés</td>
+                      {/* Achats consommés */}
+                      <tr
+                        className={`border-b border-border/30${achatsDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (achatsDetail.length) setExpandN1Achats(!expandN1Achats); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {achatsDetail.length > 0 && (expandN1Achats ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          — Achats consommés
+                        </td>
                         <N1Cell value={cr?.achatsConsommes ?? 0} />
                         {resultats.achatsConsommesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
+                      {expandN1Achats && achatsDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/20 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* Marge brute */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/10">
                         <td className="py-1.5 pr-3 text-sm">= Marge brute</td>
                         <N1Cell value={cr?.margeBrute ?? 0} />
                         {resultats.margeBruteParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
-                      <tr className={`border-b border-border/30 cursor-pointer hover:bg-muted/10`} onClick={() => setExpandChargesExternes(!expandChargesExternes)}>
+                      {/* Charges externes */}
+                      <tr className="border-b border-border/30 cursor-pointer hover:bg-muted/10" onClick={() => setExpandChargesExternes(!expandChargesExternes)}>
                         <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
                           {expandChargesExternes ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                           — Charges externes
@@ -1742,7 +1823,7 @@ export default function Page() {
                           { key: "expertComptableAvocats", label: "Expert-comptable / Avocats" },
                           { key: "fraisBancairesTerminalCB", label: "Frais bancaires / CB" },
                         ];
-                        return chargesKeys.map(({ key, label }) => {
+                        const prevRows = chargesKeys.map(({ key, label }) => {
                           const vals = (budget.chargesFixes as unknown as Record<string, [number, number, number]>)[key];
                           const inflated: [number, number, number] = [vals[0], vals[1], vals[2]];
                           if (inflated[0] === 0 && inflated[1] === 0 && inflated[2] === 0) return null;
@@ -1755,41 +1836,205 @@ export default function Page() {
                               ))}
                             </tr>
                           );
-                        });
-                      })()}
-                      {/* Lignes avec colonne N-1 */}
-                      {[
-                        { label: "= Valeur ajoutée", values: resultats.valeurAjouteeParAn, n1: cr?.valeurAjoutee, bold: true },
-                        { label: "— Impôts et taxes", values: resultats.impotsTaxesParAn, n1: cr?.impotsTaxes },
-                        { label: "— Salaires et charges personnel", values: resultats.salairesEmployesParAn.map((v,i)=>v+resultats.chargesSocialesEmployesParAn[i]) as [number,number,number], n1: cr?.chargesPersonnel },
-                        { label: "    dont salaires employés (net)", values: resultats.salairesEmployesParAn, n1: undefined },
-                        { label: "    dont charges sociales employés", values: resultats.chargesSocialesEmployesParAn, n1: undefined },
-                        { label: "— Rémunération dirigeant", values: resultats.remunerationDirigeantParAn, n1: undefined },
-                        { label: "— Charges sociales dirigeant", values: resultats.chargesSocialesDirigeantParAn, n1: undefined },
-                        { label: "= EBE", values: resultats.ebeParAn, n1: cr?.ebe, bold: true },
-                        { label: "— Dotations amortissements", values: resultats.dotationsAmortissementsParAn, n1: cr?.dotationsAmortissements },
-                        { label: "= Résultat d'exploitation", values: resultats.resultatExploitationParAn, n1: cr?.resultatExploitation, bold: true },
-                        { label: "— Charges financières", values: resultats.chargesFinancieresParAn, n1: cr?.chargesFinancieres },
-                        { label: "+ Quote-part subventions invest.", values: resultats.repriseSubventionsInvestParAn, n1: undefined },
-                        { label: "+ Subventions d'exploitation", values: resultats.subventionsExploitationParAn, n1: undefined },
-                        { label: "= Résultat courant", values: resultats.resultatCourantParAn, n1: undefined, bold: true },
-                        { label: "+ Produits divers", values: resultats.produitsDiversParAn, n1: undefined },
-                        { label: "— Charges diverses", values: resultats.chargesDiversesParAn, n1: undefined },
-                        { label: "= Résultat net", values: resultats.resultatNetParAn, n1: cr?.resultatNet, bold: true },
-                        { label: "Capacité d'autofinancement (CAF)", values: resultats.capaciteAutofinancementParAn, n1: cr?.capaciteAutofinancement, bold: true },
-                      ].map(({ label, values, n1, bold }) => (
-                        <tr key={label} className={`border-b border-border/30 ${bold ? "font-semibold bg-muted/20" : ""}`}>
-                          <td className="py-1.5 pr-3 text-sm">{label}</td>
-                          {cr ? (
-                            <td className="py-1.5 px-2 text-right text-sm tabular-nums text-muted-foreground italic">
-                              {n1 !== undefined ? n1.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }) : ""}
+                        }).filter((r): r is React.ReactElement => r !== null);
+                        const n1Rows: React.ReactElement[] = chargesExternesDetail.length > 0 ? [
+                          <tr key="n1-ce-sep" className="border-b border-border/10 bg-muted/5">
+                            <td colSpan={cr ? 5 : 4} className="py-0.5 pl-4 text-xs text-muted-foreground italic font-medium">
+                              Détail N-1 (balance comptable)
                             </td>
-                          ) : null}
-                          {values.map((v, i) => (
-                            <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>
-                          ))}
+                          </tr>,
+                          ...chargesExternesDetail.map(l => (
+                            <tr key={`n1-ce-${l.compte}`} className="border-b border-border/10 bg-muted/5">
+                              <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                              <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                                {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                              </td>
+                              <td /><td /><td />
+                            </tr>
+                          ))
+                        ] : [];
+                        return [...prevRows, ...n1Rows];
+                      })()}
+                      {/* Valeur ajoutée */}
+                      <tr className="border-b border-border/30 font-semibold bg-muted/20">
+                        <td className="py-1.5 pr-3 text-sm">= Valeur ajoutée</td>
+                        <N1Cell value={cr?.valeurAjoutee ?? 0} />
+                        {resultats.valeurAjouteeParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
+                      </tr>
+                      {/* Impôts et taxes */}
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Impôts et taxes</td>
+                        <N1Cell value={cr?.impotsTaxes ?? 0} />
+                        {resultats.impotsTaxesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {/* Salaires et charges personnel */}
+                      <tr
+                        className={`border-b border-border/30${personnelDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (personnelDetail.length) setExpandN1Personnel(!expandN1Personnel); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {personnelDetail.length > 0 && (expandN1Personnel ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          — Salaires et charges personnel
+                        </td>
+                        <N1Cell value={cr?.chargesPersonnel ?? 0} />
+                        {resultats.salairesEmployesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v + resultats.chargesSocialesEmployesParAn[i])}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/20">
+                        <td className="py-1 pl-8 pr-3 text-xs text-muted-foreground">dont salaires employés (net)</td>
+                        {cr && <td />}
+                        {resultats.salairesEmployesParAn.map((v, i) => <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">{eur(v)}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/20">
+                        <td className="py-1 pl-8 pr-3 text-xs text-muted-foreground">dont charges sociales employés</td>
+                        {cr && <td />}
+                        {resultats.chargesSocialesEmployesParAn.map((v, i) => <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">{eur(v)}</td>)}
+                      </tr>
+                      {expandN1Personnel && personnelDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
                         </tr>
                       ))}
+                      {/* Rémunération dirigeant */}
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Rémunération dirigeant</td>
+                        {cr && <td />}
+                        {resultats.remunerationDirigeantParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Charges sociales dirigeant</td>
+                        {cr && <td />}
+                        {resultats.chargesSocialesDirigeantParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {/* EBE */}
+                      <tr className="border-b border-border/30 font-semibold bg-muted/20">
+                        <td className="py-1.5 pr-3 text-sm">= EBE</td>
+                        <N1Cell value={cr?.ebe ?? 0} />
+                        {resultats.ebeParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
+                      </tr>
+                      {/* Dotations amortissements */}
+                      <tr
+                        className={`border-b border-border/30${dotationsDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (dotationsDetail.length) setExpandN1Dotations(!expandN1Dotations); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {dotationsDetail.length > 0 && (expandN1Dotations ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          — Dotations amortissements
+                        </td>
+                        <N1Cell value={cr?.dotationsAmortissements ?? 0} />
+                        {resultats.dotationsAmortissementsParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {expandN1Dotations && dotationsDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* Résultat d'exploitation */}
+                      <tr className="border-b border-border/30 font-semibold bg-muted/20">
+                        <td className="py-1.5 pr-3 text-sm">= Résultat d&apos;exploitation</td>
+                        <N1Cell value={cr?.resultatExploitation ?? 0} />
+                        {resultats.resultatExploitationParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
+                      </tr>
+                      {/* Charges financières */}
+                      <tr
+                        className={`border-b border-border/30${financieresDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (financieresDetail.length) setExpandN1Financieres(!expandN1Financieres); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {financieresDetail.length > 0 && (expandN1Financieres ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          — Charges financières
+                        </td>
+                        <N1Cell value={cr?.chargesFinancieres ?? 0} />
+                        {resultats.chargesFinancieresParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {expandN1Financieres && financieresDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* Quote-part subventions invest. */}
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">+ Quote-part subventions invest.</td>
+                        {cr && <td />}
+                        {resultats.repriseSubventionsInvestParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {/* Subventions exploitation */}
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">+ Subventions d&apos;exploitation</td>
+                        {cr && <td />}
+                        {resultats.subventionsExploitationParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {/* Résultat courant */}
+                      <tr className="border-b border-border/30 font-semibold bg-muted/20">
+                        <td className="py-1.5 pr-3 text-sm">= Résultat courant</td>
+                        {cr && <td />}
+                        {resultats.resultatCourantParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
+                      </tr>
+                      {/* Produits divers / Autres produits N-1 */}
+                      <tr
+                        className={`border-b border-border/30${autresProduitsDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (autresProduitsDetail.length) setExpandN1AutresProduits(!expandN1AutresProduits); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {autresProduitsDetail.length > 0 && (expandN1AutresProduits ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          + Produits divers
+                        </td>
+                        <N1Cell value={cr?.autresProduits ?? 0} />
+                        {resultats.produitsDiversParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {expandN1AutresProduits && autresProduitsDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* Charges diverses / Autres charges N-1 */}
+                      <tr
+                        className={`border-b border-border/30${autresChargesDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
+                        onClick={() => { if (autresChargesDetail.length) setExpandN1AutresCharges(!expandN1AutresCharges); }}
+                      >
+                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
+                          {autresChargesDetail.length > 0 && (expandN1AutresCharges ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
+                          — Charges diverses
+                        </td>
+                        <N1Cell value={cr?.autresCharges ?? 0} />
+                        {resultats.chargesDiversesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
+                      {expandN1AutresCharges && autresChargesDetail.map(l => (
+                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
+                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
+                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                          <td /><td /><td />
+                        </tr>
+                      ))}
+                      {/* Résultat net */}
+                      <tr className="border-b border-border/30 font-semibold bg-muted/20">
+                        <td className="py-1.5 pr-3 text-sm">= Résultat net</td>
+                        <N1Cell value={cr?.resultatNet ?? 0} />
+                        {resultats.resultatNetParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
+                      </tr>
+                      {/* CAF */}
+                      <tr className="border-b border-border/30 font-semibold bg-muted/20">
+                        <td className="py-1.5 pr-3 text-sm">Capacité d&apos;autofinancement (CAF)</td>
+                        <N1Cell value={cr?.capaciteAutofinancement ?? 0} />
+                        {resultats.capaciteAutofinancementParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
+                      </tr>
                     </tbody>
                   </table>
                     );

@@ -147,7 +147,13 @@ export interface Salaires {
   remunerationDirigeant: [number, number, number];
 }
 
-// --- Balance N-1 (import FEC) ---
+// --- Balance N-1 ---
+
+export interface LigneBalanceDetail {
+  compte: string;
+  intitule: string;
+  montant: number; // toujours positif, signé par catégorie
+}
 
 export interface CompteResultatNmoins1 {
   caMarchandises: number;
@@ -163,6 +169,8 @@ export interface CompteResultatNmoins1 {
   dotationsAmortissements: number;
   resultatExploitation: number;
   chargesFinancieres: number;
+  autresProduits: number; // subventions, produits div, reprises...
+  autresCharges: number;  // charges except., pertes de change...
   resultatNet: number;
   capaciteAutofinancement: number;
 }
@@ -179,8 +187,21 @@ export interface BalanceNmoins1 {
   autresDettesCT: number;
   // Compte de résultat N-1
   compteResultat: CompteResultatNmoins1;
+  // Détail des lignes (disponible si import balance Excel)
+  detailLignes?: {
+    ca: LigneBalanceDetail[];
+    achats: LigneBalanceDetail[];
+    chargesExternes: LigneBalanceDetail[];
+    impotsTaxes: LigneBalanceDetail[];
+    chargesPersonnel: LigneBalanceDetail[];
+    chargesFinancieres: LigneBalanceDetail[];
+    dotations: LigneBalanceDetail[];
+    autresCharges: LigneBalanceDetail[];
+    autresProduits: LigneBalanceDetail[];
+  };
   // Métadonnées
-  exercice?: string; // ex: "2024"
+  exercice?: string;
+  source?: "fec" | "balance";
 }
 
 export interface BudgetPrevisionnel {

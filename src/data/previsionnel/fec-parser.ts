@@ -263,9 +263,12 @@ export function parseFec(content: string): BalanceNmoins1 {
       dotationsAmortissements,
       resultatExploitation,
       chargesFinancieres,
+      autresProduits: produitsFinanciers + produitsExceptionnels,
+      autresCharges: chargesExceptionnelles + is,
       resultatNet,
       capaciteAutofinancement,
     },
+    source: "fec" as const,
     exercice,
   };
 }
