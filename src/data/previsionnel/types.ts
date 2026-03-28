@@ -147,6 +147,42 @@ export interface Salaires {
   remunerationDirigeant: [number, number, number];
 }
 
+// --- Balance N-1 (import FEC) ---
+
+export interface CompteResultatNmoins1 {
+  caMarchandises: number;
+  caServices: number;
+  caTotal: number;
+  achatsConsommes: number;
+  margeBrute: number;
+  chargesExternes: number;
+  valeurAjoutee: number;
+  impotsTaxes: number;
+  chargesPersonnel: number;
+  ebe: number;
+  dotationsAmortissements: number;
+  resultatExploitation: number;
+  chargesFinancieres: number;
+  resultatNet: number;
+  capaciteAutofinancement: number;
+}
+
+export interface BalanceNmoins1 {
+  // Bilan grandes masses N-1
+  immobilisationsNettes: number;
+  stocks: number;
+  creancesClients: number;
+  tresorerie: number;
+  capitauxPropres: number;
+  dettesFinancieresLT: number;
+  dettesFournisseurs: number;
+  autresDettesCT: number;
+  // Compte de résultat N-1
+  compteResultat: CompteResultatNmoins1;
+  // Métadonnées
+  exercice?: string; // ex: "2024"
+}
+
 export interface BudgetPrevisionnel {
   id: string;
   clientId: string;
@@ -162,6 +198,7 @@ export interface BudgetPrevisionnel {
   chargesVariables: ChargesVariables;
   bfr: BesoinFondsRoulement;
   salaires: Salaires;
+  balanceNmoins1?: BalanceNmoins1;
 }
 
 export interface Client {
@@ -244,6 +281,17 @@ export interface ResultatsPrevisionnel {
     soldeMensuel: number[];
     tresorerieCumulee: number[];
   };
+
+  // Bilan simplifié par an
+  bilanActifImmobilisationsNettes: [number, number, number];
+  bilanActifStocks: [number, number, number];
+  bilanActifCreances: [number, number, number];
+  bilanActifTresorerie: [number, number, number];
+  bilanActifTotal: [number, number, number];
+  bilanPassifCapitauxPropres: [number, number, number];
+  bilanPassifDettesLT: [number, number, number];
+  bilanPassifDettesFournisseurs: [number, number, number];
+  bilanPassifTotal: [number, number, number];
 
   // Contrôles
   estRentable: boolean;

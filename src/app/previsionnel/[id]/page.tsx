@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown } from "lucide-react";
+import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown, Upload, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -21,7 +21,8 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import { BudgetPrevisionnel } from "@/data/previsionnel/types";
+import { BudgetPrevisionnel, BalanceNmoins1 } from "@/data/previsionnel/types";
+import { parseFec } from "@/data/previsionnel/fec-parser";
 import { getClient, getBudgetsForClient, createNewBudget, saveBudget } from "@/data/previsionnel/storage";
 import {
   calculerPrevisionnel,
@@ -273,6 +274,8 @@ export default function Page() {
   const [expandEncaissements, setExpandEncaissements] = useState(false);
   const [expandDepenses, setExpandDepenses] = useState(false);
   const [expandChargesExternes, setExpandChargesExternes] = useState(false);
+  const [fecImportStatus, setFecImportStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [fecImportMessage, setFecImportMessage] = useState<string>("");
 
   useEffect(() => {
     setMounted(true);
@@ -492,6 +495,68 @@ export default function Page() {
                     </Label>
                   </div>
                 </FieldRow>
+                <div className="h-px bg-border my-4" />
+                {/* Section Balance N-1 (société en activité) */}
+                <p className="text-sm font-medium mb-2">Société en activité — Balance N-1</p>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Si votre entreprise est déjà en activité, importez votre balance comptable N-1 au format FEC (DGFIP)
+                  pour initialiser la trésorerie de départ, le BFR et afficher un compte de résultat N-1.
+                </p>
+                <div className="flex flex-col gap-2">
+                  {budget.balanceNmoins1 ? (
+                    <div className="flex items-center gap-3 rounded-md border border-green-300 bg-green-50 dark:bg-green-950/20 px-3 py-2">
+                      <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                          Balance N-1 importée{budget.balanceNmoins1.exercice ? ` (exercice ${budget.balanceNmoins1.exercice})` : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          CA : {budget.balanceNmoins1.compteResultat.caTotal.toLocaleString("fr-FR")} € •
+                          Trésorerie : {budget.balanceNmoins1.tresorerie.toLocaleString("fr-FR")} €
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => updateBudget({ balanceNmoins1: undefined })}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        title="Supprimer la balance N-1"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-2 cursor-pointer rounded-md border border-dashed border-border px-3 py-3 hover:bg-muted/20 transition-colors">
+                      <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm text-muted-foreground">
+                        {fecImportStatus === "loading" ? "Import en cours…" : "Importer un fichier FEC (.txt)"}
+                      </span>
+                      <input
+                        type="file"
+                        accept=".txt,.csv,.fec"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setFecImportStatus("loading");
+                          try {
+                            const text = await file.text();
+                            const balance: BalanceNmoins1 = parseFec(text);
+                            updateBudget({ balanceNmoins1: balance });
+                            setFecImportStatus("success");
+                            setFecImportMessage(`Importé avec succès (${Object.keys(balance).length} postes)`);
+                          } catch {
+                            setFecImportStatus("error");
+                            setFecImportMessage("Erreur lors de la lecture du fichier FEC.");
+                          }
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
+                  {fecImportStatus === "error" && (
+                    <p className="text-xs text-destructive">{fecImportMessage}</p>
+                  )}
+                </div>
                 <div className="h-px bg-border my-4" />
                 <p className="text-sm text-muted-foreground mb-3">Besoin en fonds de roulement (BFR)</p>
                 <FieldRow label="Délai clients (jours)">
@@ -1527,38 +1592,140 @@ export default function Page() {
                 </CardContent>
               </Card>
 
+              {/* Ratios sectoriels — EN HAUT des résultats */}
+              {(() => {
+                const ca1 = resultats.caTotalParAn[0];
+                if (ca1 <= 0) return null;
+                const secteurTrouve = SECTEURS_ACTIVITES.find((s) =>
+                  s.activites.some((a) => a.codeAPE === budget.infos.codeAPE)
+                );
+                const refRatios = secteurTrouve
+                  ? RATIOS_SECTORIELS.find((r) => r.secteur === secteurTrouve.secteur) ?? null
+                  : null;
+                const margeBruteClient = (resultats.margeBruteParAn[0] / ca1) * 100;
+                const margeNetteClient = (resultats.resultatNetParAn[0] / ca1) * 100;
+                const chargesFixesClient = (resultats.chargesExternesParAn[0] / ca1) * 100;
+                const statutColor: Record<StatutRatio, string> = {
+                  bon: "text-green-600", attention: "text-orange-500",
+                  alerte: "text-destructive", inconnu: "text-muted-foreground",
+                };
+                const statutBg: Record<StatutRatio, string> = {
+                  bon: "bg-green-50 dark:bg-green-950/20", attention: "bg-orange-50 dark:bg-orange-950/20",
+                  alerte: "bg-red-50 dark:bg-red-950/20", inconnu: "bg-muted/20",
+                };
+                const statutLabel: Record<StatutRatio, string> = {
+                  bon: "Dans la norme", attention: "Légèrement hors norme",
+                  alerte: "Hors norme", inconnu: "—",
+                };
+                const ratios = [
+                  { label: "Taux de marge brute", description: "(CA − Achats) / CA", client: margeBruteClient, ref: refRatios?.margeBrute ?? null },
+                  { label: "Taux de marge nette", description: "Résultat net / CA", client: margeNetteClient, ref: refRatios?.margeNette ?? null },
+                  { label: "Taux de charges fixes", description: "Charges externes / CA", client: chargesFixesClient, ref: refRatios?.chargesFixes ?? null },
+                ];
+                return (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        Analyse sectorielle — comparaison An 1
+                        {secteurTrouve && <span className="text-sm font-normal text-muted-foreground">({secteurTrouve.secteur})</span>}
+                      </CardTitle>
+                      {!secteurTrouve && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Renseignez un code APE dans l&apos;onglet Informations pour afficher la comparaison sectorielle.
+                        </p>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {ratios.map(({ label, description, client, ref }) => {
+                          const statut: StatutRatio = ref ? getStatutRatio(client, ref) : "inconnu";
+                          return (
+                            <div key={label} className={`rounded-lg border p-4 ${ref ? statutBg[statut] : "bg-muted/10"}`}>
+                              <p className="text-xs font-medium text-muted-foreground mb-0.5">{label}</p>
+                              <p className="text-[10px] text-muted-foreground mb-2">{description}</p>
+                              <p className={`text-2xl font-bold tabular-nums ${ref ? statutColor[statut] : ""}`}>{client.toFixed(1)} %</p>
+                              {ref ? (
+                                <>
+                                  <p className="text-xs text-muted-foreground mt-1">Secteur : {ref.min} % – {ref.max} % <span className="ml-1">(médiane {ref.median} %)</span></p>
+                                  <p className={`text-xs font-medium mt-1 ${statutColor[statut]}`}>{statutLabel[statut]}</p>
+                                </>
+                              ) : (
+                                <p className="text-xs text-muted-foreground mt-1">Aucune référence sectorielle disponible</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-3">
+                        Sources : Banque de France – Ratios sectoriels PME • INSEE – Enquête sectorielle annuelle
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
               {/* Compte de résultat */}
               <Card>
                 <CardHeader>
                   <CardTitle>Compte de résultat prévisionnel</CardTitle>
                 </CardHeader>
                 <CardContent>
+                  {(() => {
+                    const cr = budget.balanceNmoins1?.compteResultat;
+                    // Colonne N-1 optionnelle
+                    const N1Cell = ({ value }: { value: number }) => cr ? (
+                      <td className="py-1.5 px-2 text-right text-sm tabular-nums text-muted-foreground italic">
+                        {value.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                      </td>
+                    ) : null;
+                    return (
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="text-left py-2 text-sm font-semibold"></th>
+                        {cr && <th className="py-2 text-right text-sm font-semibold text-muted-foreground italic">N-1</th>}
                         <th className="py-2 text-right text-sm font-semibold">Année 1</th>
                         <th className="py-2 text-right text-sm font-semibold">Année 2</th>
                         <th className="py-2 text-right text-sm font-semibold">Année 3</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <ResultRow label="CA Marchandises" values={resultats.caMarhandisesParAn} />
-                      <ResultRow label="CA Services" values={resultats.caServicesParAn} />
-                      <ResultRow label="CA Total" values={resultats.caTotalParAn} bold />
-                      <ResultRow label="— Achats consommés" values={resultats.achatsConsommesParAn} />
-                      <ResultRow label="= Marge brute" values={resultats.margeBruteParAn} bold />
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">CA Marchandises</td>
+                        <N1Cell value={cr?.caMarchandises ?? 0} />
+                        {resultats.caMarhandisesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">CA Services</td>
+                        <N1Cell value={cr?.caServices ?? 0} />
+                        {resultats.caServicesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/30 font-semibold bg-muted/10">
+                        <td className="py-1.5 pr-3 text-sm">CA Total</td>
+                        <N1Cell value={cr?.caTotal ?? 0} />
+                        {resultats.caTotalParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Achats consommés</td>
+                        <N1Cell value={cr?.achatsConsommes ?? 0} />
+                        {resultats.achatsConsommesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
+                      </tr>
+                      <tr className="border-b border-border/30 font-semibold bg-muted/10">
+                        <td className="py-1.5 pr-3 text-sm">= Marge brute</td>
+                        <N1Cell value={cr?.margeBrute ?? 0} />
+                        {resultats.margeBruteParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
+                      </tr>
                       <tr className={`border-b border-border/30 cursor-pointer hover:bg-muted/10`} onClick={() => setExpandChargesExternes(!expandChargesExternes)}>
                         <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
                           {expandChargesExternes ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                           — Charges externes
                         </td>
+                        <N1Cell value={cr?.chargesExternes ?? 0} />
                         {resultats.chargesExternesParAn.map((v, i) => (
                           <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>
                         ))}
                       </tr>
                       {expandChargesExternes && (() => {
-                        const inf = budget.chargesFixes.tauxInflation ?? 0;
                         const chargesKeys = [
                           { key: "assurances", label: "Assurances" },
                           { key: "telephoneInternet", label: "Téléphone / Internet" },
@@ -1582,6 +1749,7 @@ export default function Page() {
                           return (
                             <tr key={key} className="border-b border-border/20">
                               <td className="py-1 pl-8 pr-3 text-xs text-muted-foreground">{label}</td>
+                              {cr && <td />}
                               {inflated.map((v, i) => (
                                 <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">{eur(v)}</td>
                               ))}
@@ -1589,25 +1757,43 @@ export default function Page() {
                           );
                         });
                       })()}
-                      <ResultRow label="= Valeur ajoutée" values={resultats.valeurAjouteeParAn} bold />
-                      <ResultRow label="— Impôts et taxes" values={resultats.impotsTaxesParAn} />
-                      <ResultRow label="— Salaires employés (net)" values={resultats.salairesEmployesParAn} />
-                      <ResultRow label="— Charges sociales employés" values={resultats.chargesSocialesEmployesParAn} />
-                      <ResultRow label="— Rémunération dirigeant" values={resultats.remunerationDirigeantParAn} />
-                      <ResultRow label="— Charges sociales dirigeant" values={resultats.chargesSocialesDirigeantParAn} />
-                      <ResultRow label="= EBE" values={resultats.ebeParAn} bold />
-                      <ResultRow label="— Dotations amortissements" values={resultats.dotationsAmortissementsParAn} />
-                      <ResultRow label="= Résultat d'exploitation" values={resultats.resultatExploitationParAn} bold />
-                      <ResultRow label="— Charges financières" values={resultats.chargesFinancieresParAn} />
-                      <ResultRow label="+ Quote-part subventions invest. virée au résultat" values={resultats.repriseSubventionsInvestParAn} />
-                      <ResultRow label="+ Subventions d'exploitation" values={resultats.subventionsExploitationParAn} />
-                      <ResultRow label="= Résultat courant" values={resultats.resultatCourantParAn} bold />
-                      <ResultRow label="+ Produits divers (cessions, indemnités à recevoir)" values={resultats.produitsDiversParAn} />
-                      <ResultRow label="— Charges diverses (indemnités à payer)" values={resultats.chargesDiversesParAn} />
-                      <ResultRow label="= Résultat net" values={resultats.resultatNetParAn} bold />
-                      <ResultRow label="Capacité d'autofinancement (CAF)" values={resultats.capaciteAutofinancementParAn} bold />
+                      {/* Lignes avec colonne N-1 */}
+                      {[
+                        { label: "= Valeur ajoutée", values: resultats.valeurAjouteeParAn, n1: cr?.valeurAjoutee, bold: true },
+                        { label: "— Impôts et taxes", values: resultats.impotsTaxesParAn, n1: cr?.impotsTaxes },
+                        { label: "— Salaires et charges personnel", values: resultats.salairesEmployesParAn.map((v,i)=>v+resultats.chargesSocialesEmployesParAn[i]) as [number,number,number], n1: cr?.chargesPersonnel },
+                        { label: "    dont salaires employés (net)", values: resultats.salairesEmployesParAn, n1: undefined },
+                        { label: "    dont charges sociales employés", values: resultats.chargesSocialesEmployesParAn, n1: undefined },
+                        { label: "— Rémunération dirigeant", values: resultats.remunerationDirigeantParAn, n1: undefined },
+                        { label: "— Charges sociales dirigeant", values: resultats.chargesSocialesDirigeantParAn, n1: undefined },
+                        { label: "= EBE", values: resultats.ebeParAn, n1: cr?.ebe, bold: true },
+                        { label: "— Dotations amortissements", values: resultats.dotationsAmortissementsParAn, n1: cr?.dotationsAmortissements },
+                        { label: "= Résultat d'exploitation", values: resultats.resultatExploitationParAn, n1: cr?.resultatExploitation, bold: true },
+                        { label: "— Charges financières", values: resultats.chargesFinancieresParAn, n1: cr?.chargesFinancieres },
+                        { label: "+ Quote-part subventions invest.", values: resultats.repriseSubventionsInvestParAn, n1: undefined },
+                        { label: "+ Subventions d'exploitation", values: resultats.subventionsExploitationParAn, n1: undefined },
+                        { label: "= Résultat courant", values: resultats.resultatCourantParAn, n1: undefined, bold: true },
+                        { label: "+ Produits divers", values: resultats.produitsDiversParAn, n1: undefined },
+                        { label: "— Charges diverses", values: resultats.chargesDiversesParAn, n1: undefined },
+                        { label: "= Résultat net", values: resultats.resultatNetParAn, n1: cr?.resultatNet, bold: true },
+                        { label: "Capacité d'autofinancement (CAF)", values: resultats.capaciteAutofinancementParAn, n1: cr?.capaciteAutofinancement, bold: true },
+                      ].map(({ label, values, n1, bold }) => (
+                        <tr key={label} className={`border-b border-border/30 ${bold ? "font-semibold bg-muted/20" : ""}`}>
+                          <td className="py-1.5 pr-3 text-sm">{label}</td>
+                          {cr ? (
+                            <td className="py-1.5 px-2 text-right text-sm tabular-nums text-muted-foreground italic">
+                              {n1 !== undefined ? n1.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }) : ""}
+                            </td>
+                          ) : null}
+                          {values.map((v, i) => (
+                            <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>
+                          ))}
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
+                    );
+                  })()}
                 </CardContent>
               </Card>
 
@@ -1750,6 +1936,61 @@ export default function Page() {
                 </CardContent>
               </Card>
 
+              {/* Bilan simplifié */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Bilan simplifié (grandes masses)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* ACTIF */}
+                    <div>
+                      <p className="text-sm font-bold mb-2 text-blue-700 dark:text-blue-400">ACTIF</p>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="text-left py-1.5 text-xs font-semibold text-muted-foreground"></th>
+                            <th className="py-1.5 text-right text-xs font-semibold">An 1</th>
+                            <th className="py-1.5 text-right text-xs font-semibold">An 2</th>
+                            <th className="py-1.5 text-right text-xs font-semibold">An 3</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <ResultRow label="Immobilisations nettes" values={resultats.bilanActifImmobilisationsNettes} />
+                          <ResultRow label="Stocks" values={resultats.bilanActifStocks} />
+                          <ResultRow label="Créances clients" values={resultats.bilanActifCreances} />
+                          <ResultRow label="Trésorerie" values={resultats.bilanActifTresorerie} />
+                          <ResultRow label="Total Actif" values={resultats.bilanActifTotal} bold />
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* PASSIF */}
+                    <div>
+                      <p className="text-sm font-bold mb-2 text-purple-700 dark:text-purple-400">PASSIF</p>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="text-left py-1.5 text-xs font-semibold text-muted-foreground"></th>
+                            <th className="py-1.5 text-right text-xs font-semibold">An 1</th>
+                            <th className="py-1.5 text-right text-xs font-semibold">An 2</th>
+                            <th className="py-1.5 text-right text-xs font-semibold">An 3</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <ResultRow label="Capitaux propres" values={resultats.bilanPassifCapitauxPropres} />
+                          <ResultRow label="Dettes financières LT" values={resultats.bilanPassifDettesLT} />
+                          <ResultRow label="Dettes fournisseurs" values={resultats.bilanPassifDettesFournisseurs} />
+                          <ResultRow label="Total Passif" values={resultats.bilanPassifTotal} bold />
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-3">
+                    Bilan simplifié calculé sur la base des hypothèses du prévisionnel. Hors crédit-bail, provisions et éléments exceptionnels.
+                  </p>
+                </CardContent>
+              </Card>
+
               {/* Trésorerie mensuelle détaillée */}
               <Card>
                 <CardHeader>
@@ -1856,122 +2097,6 @@ export default function Page() {
                   </div>
                 </CardContent>
               </Card>
-
-              {/* Ratios sectoriels */}
-              {(() => {
-                const ca1 = resultats.caTotalParAn[0];
-                if (ca1 <= 0) return null;
-
-                // Trouver le secteur correspondant au code APE du budget
-                const secteurTrouve = SECTEURS_ACTIVITES.find((s) =>
-                  s.activites.some((a) => a.codeAPE === budget.infos.codeAPE)
-                );
-                const refRatios = secteurTrouve
-                  ? RATIOS_SECTORIELS.find((r) => r.secteur === secteurTrouve.secteur) ?? null
-                  : null;
-
-                // Ratios calculés du client (An 1, en %)
-                const margeBruteClient = (resultats.margeBruteParAn[0] / ca1) * 100;
-                const margeNetteClient = (resultats.resultatNetParAn[0] / ca1) * 100;
-                const chargesFixesClient = (resultats.chargesExternesParAn[0] / ca1) * 100;
-
-                const statutColor: Record<StatutRatio, string> = {
-                  bon: "text-green-600",
-                  attention: "text-orange-500",
-                  alerte: "text-destructive",
-                  inconnu: "text-muted-foreground",
-                };
-                const statutBg: Record<StatutRatio, string> = {
-                  bon: "bg-green-50 dark:bg-green-950/20",
-                  attention: "bg-orange-50 dark:bg-orange-950/20",
-                  alerte: "bg-red-50 dark:bg-red-950/20",
-                  inconnu: "bg-muted/20",
-                };
-                const statutLabel: Record<StatutRatio, string> = {
-                  bon: "Dans la norme",
-                  attention: "Légèrement hors norme",
-                  alerte: "Hors norme",
-                  inconnu: "—",
-                };
-
-                const ratios = [
-                  {
-                    label: "Taux de marge brute",
-                    description: "(CA − Achats) / CA",
-                    client: margeBruteClient,
-                    ref: refRatios?.margeBrute ?? null,
-                  },
-                  {
-                    label: "Taux de marge nette",
-                    description: "Résultat net / CA",
-                    client: margeNetteClient,
-                    ref: refRatios?.margeNette ?? null,
-                  },
-                  {
-                    label: "Taux de charges fixes",
-                    description: "Charges externes / CA",
-                    client: chargesFixesClient,
-                    ref: refRatios?.chargesFixes ?? null,
-                  },
-                ];
-
-                return (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        Ratios sectoriels — comparaison An 1
-                        {secteurTrouve && (
-                          <span className="text-sm font-normal text-muted-foreground">
-                            ({secteurTrouve.secteur})
-                          </span>
-                        )}
-                      </CardTitle>
-                      {!secteurTrouve && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Renseignez un code APE dans l&apos;onglet Informations pour afficher la comparaison sectorielle.
-                        </p>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {ratios.map(({ label, description, client, ref }) => {
-                          const statut: StatutRatio = ref ? getStatutRatio(client, ref) : "inconnu";
-                          return (
-                            <div
-                              key={label}
-                              className={`rounded-lg border p-4 ${ref ? statutBg[statut] : "bg-muted/10"}`}
-                            >
-                              <p className="text-xs font-medium text-muted-foreground mb-0.5">{label}</p>
-                              <p className="text-[10px] text-muted-foreground mb-2">{description}</p>
-                              <p className={`text-2xl font-bold tabular-nums ${ref ? statutColor[statut] : ""}`}>
-                                {client.toFixed(1)} %
-                              </p>
-                              {ref ? (
-                                <>
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    Secteur : {ref.min} % – {ref.max} %
-                                    <span className="ml-1">(médiane {ref.median} %)</span>
-                                  </p>
-                                  <p className={`text-xs font-medium mt-1 ${statutColor[statut]}`}>
-                                    {statutLabel[statut]}
-                                  </p>
-                                </>
-                              ) : (
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Aucune référence sectorielle disponible
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-3">
-                        Sources : Banque de France – Ratios sectoriels PME • INSEE – Enquête sectorielle annuelle
-                      </p>
-                    </CardContent>
-                  </Card>
-                );
-              })()}
 
               {/* Seuil de rentabilité (à la fin) */}
               <Card>

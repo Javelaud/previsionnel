@@ -369,8 +369,13 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
   const bfrParAn: T3 = creancesClientsParAn.map((c, i) =>
     c - dettesFournisseursParAn[i]
   ) as T3;
+
+  // BFR N-1 : si une balance N-1 est renseignée, la variation An1 tient compte du BFR existant
+  const bfrNmoins1 = b.balanceNmoins1
+    ? b.balanceNmoins1.creancesClients - b.balanceNmoins1.dettesFournisseurs
+    : 0;
   const variationBfrParAn: T3 = [
-    bfrParAn[0],
+    bfrParAn[0] - bfrNmoins1, // An1 : variation par rapport au BFR N-1
     bfrParAn[1] - bfrParAn[0],
     bfrParAn[2] - bfrParAn[1],
   ];
@@ -397,10 +402,12 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
       - div.dividendes[2] - div.remboursementsComptesCourants[2],
   ];
 
+  // Pour une société existante, la trésorerie cumulée part de la trésorerie N-1
+  const tresorerieDeDepart = b.balanceNmoins1?.tresorerie ?? 0;
   const excedentTresorerieParAn: T3 = [
-    variationTresorerieParAn[0],
-    variationTresorerieParAn[0] + variationTresorerieParAn[1],
-    variationTresorerieParAn[0] + variationTresorerieParAn[1] + variationTresorerieParAn[2],
+    tresorerieDeDepart + variationTresorerieParAn[0],
+    tresorerieDeDepart + variationTresorerieParAn[0] + variationTresorerieParAn[1],
+    tresorerieDeDepart + variationTresorerieParAn[0] + variationTresorerieParAn[1] + variationTresorerieParAn[2],
   ];
 
   // Trésorerie mensuelle année 1 (détaillée)
@@ -425,7 +432,9 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
   const detailSoldeMensuel: number[] = [];
   const detailTresorerieCumulee: number[] = [];
 
-  let soldeCumul = b.besoins.tresorerieDépart;
+  // La trésorerie de départ mensuelle est la trésorerie N-1 si elle existe, sinon le besoin saisi
+  const soldeCumulInitial = b.balanceNmoins1 ? b.balanceNmoins1.tresorerie : b.besoins.tresorerieDépart;
+  let soldeCumul = soldeCumulInitial;
   for (let m = 0; m < 12; m++) {
     const subExploitMensuel = subventionsExploitationParAn[0] / 12;
     const diversEncaissementsMensuel = (div.cessionsImmobilisations[0] + div.indemnitesARecevoir[0]) / 12;
@@ -445,6 +454,64 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
     detailTresorerieCumulee.push(Math.round(soldeCumul));
     tresorerieMensuelle.push(Math.round(soldeCumul));
   }
+
+  // ── Bilan simplifié par an ────────────────────────────────────────────────
+  const totalImmobAmort = getTotalImmobilisationsAmortissables(b);
+  const dotAnnuelle = getDotationAmortissementAnnuelle(b);
+  // Immobilisations nettes = investissement initial - amortissements cumulés
+  const bilanActifImmobilisationsNettes: T3 = [
+    Math.max(0, totalImmobAmort + b.besoins.terrain - dotAnnuelle),
+    Math.max(0, totalImmobAmort + b.besoins.terrain - 2 * dotAnnuelle),
+    Math.max(0, totalImmobAmort + b.besoins.terrain - 3 * dotAnnuelle),
+  ];
+  // Stocks : stock initial (constant, simplifié)
+  const stocksInitial = b.besoins.stockMatieresProduits ?? 0;
+  const bilanActifStocks: T3 = [stocksInitial, stocksInitial, stocksInitial];
+  // Créances = BFR créances
+  const bilanActifCreances: T3 = creancesClientsParAn;
+  // Trésorerie à la fin de chaque année
+  const bilanActifTresorerie: T3 = [
+    Math.round(tresorerieMensuelle[tresorerieMensuelle.length - 1] ?? 0),
+    Math.round((tresorerieMensuelle[tresorerieMensuelle.length - 1] ?? 0) + variationTresorerieParAn[1]),
+    Math.round((tresorerieMensuelle[tresorerieMensuelle.length - 1] ?? 0) + variationTresorerieParAn[1] + variationTresorerieParAn[2]),
+  ];
+  const bilanActifTotal: T3 = bilanActifImmobilisationsNettes.map((v, i) =>
+    v + bilanActifStocks[i] + bilanActifCreances[i] + bilanActifTresorerie[i]
+  ) as T3;
+
+  // Capitaux propres = apport initial + résultats cumulés - dividendes cumulés
+  const apportInitial = b.financement.apportPersonnel + b.financement.apportsNature;
+  const bilanPassifCapitauxPropres: T3 = [
+    apportInitial + resultatNetParAn[0] - (b.divers.dividendes[0] ?? 0),
+    apportInitial + resultatNetParAn[0] + resultatNetParAn[1] - (b.divers.dividendes[0] ?? 0) - (b.divers.dividendes[1] ?? 0),
+    apportInitial + resultatNetParAn[0] + resultatNetParAn[1] + resultatNetParAn[2]
+      - (b.divers.dividendes[0] ?? 0) - (b.divers.dividendes[1] ?? 0) - (b.divers.dividendes[2] ?? 0),
+  ];
+  // Dettes financières LT = capital restant dû sur emprunts à la fin de chaque année
+  const bilanPassifDettesLT: T3 = [0, 1, 2].map((i) =>
+    Math.max(0, b.financement.prets.reduce((sum, p) => {
+      const capitalRembourse = analyses.reduce((s, a, j) => {
+        // Seulement pour le prêt j correspondant
+        if (j < analyses.length && b.financement.prets[j] === p) {
+          return s + ([...Array(i + 1)].reduce((ss, _, k) => ss + (a.principalParAn[k] ?? 0), 0));
+        }
+        return s;
+      }, 0);
+      return sum + Math.max(0, p.montant - capitalRembourse);
+    }, 0))
+  ) as T3;
+  // Recalcul simplifié des dettes LT : montant total - remboursements cumulés
+  const totalPrets = b.financement.prets.reduce((s, p) => s + p.montant, 0);
+  const bilanPassifDettesLTSimple: T3 = [
+    Math.max(0, totalPrets - remboursementsEmpruntParAn[0]),
+    Math.max(0, totalPrets - remboursementsEmpruntParAn[0] - remboursementsEmpruntParAn[1]),
+    Math.max(0, totalPrets - remboursementsEmpruntParAn[0] - remboursementsEmpruntParAn[1] - remboursementsEmpruntParAn[2]),
+  ];
+  // Dettes fournisseurs
+  const bilanPassifDettesFournisseurs: T3 = dettesFournisseursParAn;
+  const bilanPassifTotal: T3 = bilanPassifCapitauxPropres.map((v, i) =>
+    v + bilanPassifDettesLTSimple[i] + bilanPassifDettesFournisseurs[i]
+  ) as T3;
 
   // Contrôles
   const estRentable = resultatNetParAn[0] > 0;
@@ -477,6 +544,15 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
       soldeMensuel: detailSoldeMensuel,
       tresorerieCumulee: detailTresorerieCumulee,
     },
+    bilanActifImmobilisationsNettes,
+    bilanActifStocks,
+    bilanActifCreances,
+    bilanActifTresorerie,
+    bilanActifTotal,
+    bilanPassifCapitauxPropres,
+    bilanPassifDettesLT: bilanPassifDettesLTSimple,
+    bilanPassifDettesFournisseurs,
+    bilanPassifTotal,
     estRentable, tresorerieAdequate,
   };
 }
