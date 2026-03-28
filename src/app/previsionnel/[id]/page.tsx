@@ -2187,25 +2187,67 @@ export default function Page() {
                   <CardTitle>Bilan simplifié (grandes masses)</CardTitle>
                 </CardHeader>
                 <CardContent>
+                  {(() => {
+                    const bn = budget.balanceNmoins1;
+                    // Calculs N-1 pour affichage colonne (actif & passif doivent s'équilibrer)
+                    const actifN1Total = bn
+                      ? bn.immobilisationsNettes + bn.stocks + bn.creancesClients + bn.tresorerie
+                      : 0;
+                    const autresDettesCTN1 = bn
+                      ? Math.max(0, actifN1Total - bn.capitauxPropres - bn.dettesFinancieresLT - bn.dettesFournisseurs)
+                      : 0;
+                    // Helper cellule N-1
+                    const N1 = (v: number) => bn ? (
+                      <td className="py-1.5 px-2 text-right text-sm tabular-nums text-muted-foreground italic">
+                        {v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                      </td>
+                    ) : null;
+                    // Helper ligne de bilan
+                    const BR = ({ label, n1, values, bold, sub }: {
+                      label: string; n1: number; values: [number, number, number]; bold?: boolean; sub?: boolean;
+                    }) => (
+                      <tr className={`border-b border-border/30 ${bold ? "font-semibold bg-muted/20" : ""}`}>
+                        <td className={`py-1.5 pr-3 text-sm ${sub ? "pl-5 text-xs text-muted-foreground" : ""}`}>{label}</td>
+                        <N1 v={n1} />
+                        {values.map((v, i) => (
+                          <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${sub ? "text-xs text-muted-foreground" : ""} ${v < 0 ? "text-destructive" : ""}`}>
+                            {v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                    const headers = (
+                      <tr className="border-b border-border">
+                        <th className="text-left py-1.5 text-xs font-semibold text-muted-foreground"></th>
+                        {bn && <th className="py-1.5 text-right text-xs font-semibold text-muted-foreground italic">N-1</th>}
+                        <th className="py-1.5 text-right text-xs font-semibold">An 1</th>
+                        <th className="py-1.5 text-right text-xs font-semibold">An 2</th>
+                        <th className="py-1.5 text-right text-xs font-semibold">An 3</th>
+                      </tr>
+                    );
+                    return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* ACTIF */}
                     <div>
                       <p className="text-sm font-bold mb-2 text-blue-700 dark:text-blue-400">ACTIF</p>
                       <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-border">
-                            <th className="text-left py-1.5 text-xs font-semibold text-muted-foreground"></th>
-                            <th className="py-1.5 text-right text-xs font-semibold">An 1</th>
-                            <th className="py-1.5 text-right text-xs font-semibold">An 2</th>
-                            <th className="py-1.5 text-right text-xs font-semibold">An 3</th>
-                          </tr>
-                        </thead>
+                        <thead>{headers}</thead>
                         <tbody>
-                          <ResultRow label="Immobilisations nettes" values={resultats.bilanActifImmobilisationsNettes} />
-                          <ResultRow label="Stocks" values={resultats.bilanActifStocks} />
-                          <ResultRow label="Créances clients" values={resultats.bilanActifCreances} />
-                          <ResultRow label="Trésorerie" values={resultats.bilanActifTresorerie} />
-                          <ResultRow label="Total Actif" values={resultats.bilanActifTotal} bold />
+                          <BR label="Immobilisations nettes"
+                            n1={bn?.immobilisationsNettes ?? 0}
+                            values={resultats.bilanActifImmobilisationsNettes} />
+                          <BR label="Stocks"
+                            n1={bn?.stocks ?? 0}
+                            values={resultats.bilanActifStocks} />
+                          <BR label="Créances clients"
+                            n1={bn?.creancesClients ?? 0}
+                            values={resultats.bilanActifCreances} />
+                          <BR label="Trésorerie (disponibilités)"
+                            n1={bn?.tresorerie ?? 0}
+                            values={resultats.bilanActifTresorerie} />
+                          <BR label="Total Actif"
+                            n1={actifN1Total}
+                            values={resultats.bilanActifTotal} bold />
                         </tbody>
                       </table>
                     </div>
@@ -2213,25 +2255,37 @@ export default function Page() {
                     <div>
                       <p className="text-sm font-bold mb-2 text-purple-700 dark:text-purple-400">PASSIF</p>
                       <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-border">
-                            <th className="text-left py-1.5 text-xs font-semibold text-muted-foreground"></th>
-                            <th className="py-1.5 text-right text-xs font-semibold">An 1</th>
-                            <th className="py-1.5 text-right text-xs font-semibold">An 2</th>
-                            <th className="py-1.5 text-right text-xs font-semibold">An 3</th>
-                          </tr>
-                        </thead>
+                        <thead>{headers}</thead>
                         <tbody>
-                          <ResultRow label="Capitaux propres" values={resultats.bilanPassifCapitauxPropres} />
-                          <ResultRow label="Dettes financières LT" values={resultats.bilanPassifDettesLT} />
-                          <ResultRow label="Dettes fournisseurs" values={resultats.bilanPassifDettesFournisseurs} />
-                          <ResultRow label="Total Passif" values={resultats.bilanPassifTotal} bold />
+                          <BR label="Capitaux propres"
+                            n1={bn?.capitauxPropres ?? 0}
+                            values={resultats.bilanPassifCapitauxPropres} bold />
+                          <BR label="dont Capital & Réserves (début)"
+                            n1={bn?.capitauxPropres ?? 0}
+                            values={resultats.bilanPassifCapitauxPropresBase} sub />
+                          <BR label="dont Résultat de l'exercice"
+                            n1={bn?.compteResultat.resultatNet ?? 0}
+                            values={resultats.resultatNetParAn} sub />
+                          <BR label="Dettes financières LT"
+                            n1={bn?.dettesFinancieresLT ?? 0}
+                            values={resultats.bilanPassifDettesLT} />
+                          <BR label="Dettes fournisseurs"
+                            n1={bn?.dettesFournisseurs ?? 0}
+                            values={resultats.bilanPassifDettesFournisseurs} />
+                          <BR label="Autres dettes CT (fiscal, social…)"
+                            n1={autresDettesCTN1}
+                            values={resultats.bilanPassifAutresDettesCT} />
+                          <BR label="Total Passif"
+                            n1={actifN1Total}
+                            values={resultats.bilanPassifTotal} bold />
                         </tbody>
                       </table>
                     </div>
                   </div>
+                    );
+                  })()}
                   <p className="text-[10px] text-muted-foreground mt-3">
-                    Bilan simplifié calculé sur la base des hypothèses du prévisionnel. Hors crédit-bail, provisions et éléments exceptionnels.
+                    Bilan simplifié calculé sur la base des hypothèses du prévisionnel. Les capitaux propres de départ intègrent le bilan N-1 si importé. Les &laquo;&nbsp;Autres dettes CT&nbsp;&raquo; regroupent TVA collectée nette, charges sociales à payer, IS, etc. Hors crédit-bail et provisions.
                   </p>
                 </CardContent>
               </Card>

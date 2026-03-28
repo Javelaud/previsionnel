@@ -479,14 +479,22 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
     v + bilanActifStocks[i] + bilanActifCreances[i] + bilanActifTresorerie[i]
   ) as T3;
 
-  // Capitaux propres = apport initial + résultats cumulés - dividendes cumulés
+  // Capitaux propres :
+  //   - Si balance N-1 importée : base = CP réels N-1 (capital + réserves + résultat N-1)
+  //   - Sinon : base = apport personnel + apports en nature
+  const cpBaseNmoins1 = b.balanceNmoins1?.capitauxPropres ?? 0;
   const apportInitial = b.financement.apportPersonnel + b.financement.apportsNature;
-  const bilanPassifCapitauxPropres: T3 = [
-    apportInitial + resultatNetParAn[0] - (b.divers.dividendes[0] ?? 0),
-    apportInitial + resultatNetParAn[0] + resultatNetParAn[1] - (b.divers.dividendes[0] ?? 0) - (b.divers.dividendes[1] ?? 0),
-    apportInitial + resultatNetParAn[0] + resultatNetParAn[1] + resultatNetParAn[2]
-      - (b.divers.dividendes[0] ?? 0) - (b.divers.dividendes[1] ?? 0) - (b.divers.dividendes[2] ?? 0),
+  const cpBase = b.balanceNmoins1 ? cpBaseNmoins1 : apportInitial;
+  // Capital & Réserves en début de chaque exercice (= CP fin exercice précédent)
+  const bilanPassifCapitauxPropresBase: T3 = [
+    cpBase,
+    cpBase + resultatNetParAn[0] - (b.divers.dividendes[0] ?? 0),
+    cpBase + resultatNetParAn[0] + resultatNetParAn[1]
+      - (b.divers.dividendes[0] ?? 0) - (b.divers.dividendes[1] ?? 0),
   ];
+  const bilanPassifCapitauxPropres: T3 = bilanPassifCapitauxPropresBase.map((base, i) =>
+    base + resultatNetParAn[i] - (b.divers.dividendes[i] ?? 0)
+  ) as T3;
   // Dettes financières LT = capital restant dû sur emprunts à la fin de chaque année
   const bilanPassifDettesLT: T3 = [0, 1, 2].map((i) =>
     Math.max(0, b.financement.prets.reduce((sum, p) => {
@@ -509,8 +517,13 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
   ];
   // Dettes fournisseurs
   const bilanPassifDettesFournisseurs: T3 = dettesFournisseursParAn;
+  // Autres dettes CT = plug d'équilibre comptable (TVA collectée nette, charges sociales à payer, IS, etc.)
+  // = tout ce qui est au passif CT hors fournisseurs (garantit l'équilibre Actif = Passif)
+  const bilanPassifAutresDettesCT: T3 = bilanActifTotal.map((actif, i) =>
+    Math.max(0, actif - bilanPassifCapitauxPropres[i] - bilanPassifDettesLTSimple[i] - bilanPassifDettesFournisseurs[i])
+  ) as T3;
   const bilanPassifTotal: T3 = bilanPassifCapitauxPropres.map((v, i) =>
-    v + bilanPassifDettesLTSimple[i] + bilanPassifDettesFournisseurs[i]
+    v + bilanPassifDettesLTSimple[i] + bilanPassifDettesFournisseurs[i] + bilanPassifAutresDettesCT[i]
   ) as T3;
 
   // Contrôles
@@ -549,9 +562,11 @@ export function calculerPrevisionnel(b: BudgetPrevisionnel): ResultatsPrevisionn
     bilanActifCreances,
     bilanActifTresorerie,
     bilanActifTotal,
+    bilanPassifCapitauxPropresBase,
     bilanPassifCapitauxPropres,
     bilanPassifDettesLT: bilanPassifDettesLTSimple,
     bilanPassifDettesFournisseurs,
+    bilanPassifAutresDettesCT,
     bilanPassifTotal,
     estRentable, tresorerieAdequate,
   };

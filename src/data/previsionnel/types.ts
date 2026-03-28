@@ -309,9 +309,11 @@ export interface ResultatsPrevisionnel {
   bilanActifCreances: [number, number, number];
   bilanActifTresorerie: [number, number, number];
   bilanActifTotal: [number, number, number];
-  bilanPassifCapitauxPropres: [number, number, number];
+  bilanPassifCapitauxPropresBase: [number, number, number];  // Capital & Réserves en début d'exercice
+  bilanPassifCapitauxPropres: [number, number, number];       // Total CP en fin d'exercice
   bilanPassifDettesLT: [number, number, number];
   bilanPassifDettesFournisseurs: [number, number, number];
+  bilanPassifAutresDettesCT: [number, number, number];        // Autres dettes CT (TVA, charges sociales, IS…)
   bilanPassifTotal: [number, number, number];
 
   // Contrôles
