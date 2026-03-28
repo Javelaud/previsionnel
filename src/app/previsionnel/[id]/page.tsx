@@ -30,6 +30,7 @@ import {
 } from "@/data/previsionnel/calculations";
 import { exportToExcel } from "@/data/previsionnel/excel-export";
 import { SECTEURS_ACTIVITES, TOUTES_ACTIVITES } from "@/data/previsionnel/activites-ape";
+import { RATIOS_SECTORIELS, getStatutRatio, type StatutRatio } from "@/data/previsionnel/ratios-sectoriels";
 import { useEquilibre } from "@/contexts/equilibre-context";
 
 // ---- Helpers ----
@@ -1855,6 +1856,122 @@ export default function Page() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Ratios sectoriels */}
+              {(() => {
+                const ca1 = resultats.caTotalParAn[0];
+                if (ca1 <= 0) return null;
+
+                // Trouver le secteur correspondant au code APE du budget
+                const secteurTrouve = SECTEURS_ACTIVITES.find((s) =>
+                  s.activites.some((a) => a.codeAPE === budget.infos.codeAPE)
+                );
+                const refRatios = secteurTrouve
+                  ? RATIOS_SECTORIELS.find((r) => r.secteur === secteurTrouve.secteur) ?? null
+                  : null;
+
+                // Ratios calculés du client (An 1, en %)
+                const margeBruteClient = (resultats.margeBruteParAn[0] / ca1) * 100;
+                const margeNetteClient = (resultats.resultatNetParAn[0] / ca1) * 100;
+                const chargesFixesClient = (resultats.chargesExternesParAn[0] / ca1) * 100;
+
+                const statutColor: Record<StatutRatio, string> = {
+                  bon: "text-green-600",
+                  attention: "text-orange-500",
+                  alerte: "text-destructive",
+                  inconnu: "text-muted-foreground",
+                };
+                const statutBg: Record<StatutRatio, string> = {
+                  bon: "bg-green-50 dark:bg-green-950/20",
+                  attention: "bg-orange-50 dark:bg-orange-950/20",
+                  alerte: "bg-red-50 dark:bg-red-950/20",
+                  inconnu: "bg-muted/20",
+                };
+                const statutLabel: Record<StatutRatio, string> = {
+                  bon: "Dans la norme",
+                  attention: "Légèrement hors norme",
+                  alerte: "Hors norme",
+                  inconnu: "—",
+                };
+
+                const ratios = [
+                  {
+                    label: "Taux de marge brute",
+                    description: "(CA − Achats) / CA",
+                    client: margeBruteClient,
+                    ref: refRatios?.margeBrute ?? null,
+                  },
+                  {
+                    label: "Taux de marge nette",
+                    description: "Résultat net / CA",
+                    client: margeNetteClient,
+                    ref: refRatios?.margeNette ?? null,
+                  },
+                  {
+                    label: "Taux de charges fixes",
+                    description: "Charges externes / CA",
+                    client: chargesFixesClient,
+                    ref: refRatios?.chargesFixes ?? null,
+                  },
+                ];
+
+                return (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        Ratios sectoriels — comparaison An 1
+                        {secteurTrouve && (
+                          <span className="text-sm font-normal text-muted-foreground">
+                            ({secteurTrouve.secteur})
+                          </span>
+                        )}
+                      </CardTitle>
+                      {!secteurTrouve && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Renseignez un code APE dans l&apos;onglet Informations pour afficher la comparaison sectorielle.
+                        </p>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {ratios.map(({ label, description, client, ref }) => {
+                          const statut: StatutRatio = ref ? getStatutRatio(client, ref) : "inconnu";
+                          return (
+                            <div
+                              key={label}
+                              className={`rounded-lg border p-4 ${ref ? statutBg[statut] : "bg-muted/10"}`}
+                            >
+                              <p className="text-xs font-medium text-muted-foreground mb-0.5">{label}</p>
+                              <p className="text-[10px] text-muted-foreground mb-2">{description}</p>
+                              <p className={`text-2xl font-bold tabular-nums ${ref ? statutColor[statut] : ""}`}>
+                                {client.toFixed(1)} %
+                              </p>
+                              {ref ? (
+                                <>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    Secteur : {ref.min} % – {ref.max} %
+                                    <span className="ml-1">(médiane {ref.median} %)</span>
+                                  </p>
+                                  <p className={`text-xs font-medium mt-1 ${statutColor[statut]}`}>
+                                    {statutLabel[statut]}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Aucune référence sectorielle disponible
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-3">
+                        Sources : Banque de France – Ratios sectoriels PME • INSEE – Enquête sectorielle annuelle
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
               {/* Seuil de rentabilité (à la fin) */}
               <Card>
