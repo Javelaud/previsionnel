@@ -1721,47 +1721,17 @@ export default function Page() {
                     </thead>
                     <tbody>
                       {/* CA Marchandises */}
-                      <tr
-                        className={`border-b border-border/30${caMarchDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (caMarchDetail.length) setExpandN1CA(!expandN1CA); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {caMarchDetail.length > 0 && (expandN1CA ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          CA Marchandises
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">CA Marchandises</td>
                         <N1Cell value={cr?.caMarchandises ?? 0} />
                         {resultats.caMarhandisesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
-                      {expandN1CA && caMarchDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/20 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* CA Services */}
-                      <tr
-                        className={`border-b border-border/30${caServDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (caServDetail.length) setExpandN1Serv(!expandN1Serv); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {caServDetail.length > 0 && (expandN1Serv ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          CA Services
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">CA Services</td>
                         <N1Cell value={cr?.caServices ?? 0} />
                         {resultats.caServicesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
-                      {expandN1Serv && caServDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/20 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* CA Total */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/10">
                         <td className="py-1.5 pr-3 text-sm">CA Total</td>
@@ -1769,26 +1739,11 @@ export default function Page() {
                         {resultats.caTotalParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
                       {/* Achats consommés */}
-                      <tr
-                        className={`border-b border-border/30${achatsDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (achatsDetail.length) setExpandN1Achats(!expandN1Achats); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {achatsDetail.length > 0 && (expandN1Achats ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          — Achats consommés
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Achats consommés</td>
                         <N1Cell value={cr?.achatsConsommes ?? 0} />
                         {resultats.achatsConsommesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}</td>)}
                       </tr>
-                      {expandN1Achats && achatsDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/20 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* Marge brute */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/10">
                         <td className="py-1.5 pr-3 text-sm">= Marge brute</td>
@@ -1807,53 +1762,70 @@ export default function Page() {
                         ))}
                       </tr>
                       {expandChargesExternes && (() => {
+                        // Catégories du prévisionnel + prefixes PCG pour mapper les comptes N-1
                         const chargesKeys = [
-                          { key: "assurances", label: "Assurances" },
-                          { key: "telephoneInternet", label: "Téléphone / Internet" },
-                          { key: "autresAbonnements", label: "Autres abonnements" },
-                          { key: "carburantTransports", label: "Carburant / Transports" },
-                          { key: "fraisDeplacementHebergement", label: "Déplacements / Hébergement" },
-                          { key: "eauElectriciteGaz", label: "Eau / Électricité / Gaz" },
-                          { key: "mutuelle", label: "Mutuelle" },
-                          { key: "fournituresDiverses", label: "Fournitures diverses" },
-                          { key: "entretienMaterielVetements", label: "Entretien / Vêtements" },
-                          { key: "nettoyageLocaux", label: "Nettoyage locaux" },
-                          { key: "budgetPubliciteCommunication", label: "Publicité / Communication" },
-                          { key: "loyerChargesLocatives", label: "Loyer / Charges locatives" },
-                          { key: "expertComptableAvocats", label: "Expert-comptable / Avocats" },
-                          { key: "fraisBancairesTerminalCB", label: "Frais bancaires / CB" },
+                          { key: "loyerChargesLocatives",       label: "Loyer / Charges locatives",      n1p: ["613"] },
+                          { key: "nettoyageLocaux",             label: "Nettoyage locaux",               n1p: ["614"] },
+                          { key: "entretienMaterielVetements",  label: "Entretien / Vêtements",          n1p: ["615"] },
+                          { key: "assurances",                  label: "Assurances",                     n1p: ["616"] },
+                          { key: "autresAbonnements",           label: "Autres abonnements",             n1p: ["618", "628"] },
+                          { key: "expertComptableAvocats",      label: "Expert-comptable / Avocats",     n1p: ["622"] },
+                          { key: "budgetPubliciteCommunication",label: "Publicité / Communication",      n1p: ["623"] },
+                          { key: "carburantTransports",         label: "Carburant / Transports",         n1p: ["624"] },
+                          { key: "fraisDeplacementHebergement", label: "Déplacements / Hébergement",     n1p: ["625"] },
+                          { key: "telephoneInternet",           label: "Téléphone / Internet",           n1p: ["626"] },
+                          { key: "fraisBancairesTerminalCB",    label: "Frais bancaires / CB",           n1p: ["627"] },
+                          { key: "eauElectriciteGaz",           label: "Eau / Électricité / Gaz",        n1p: ["606"] },
+                          { key: "fournituresDiverses",         label: "Fournitures diverses",           n1p: [] },
+                          { key: "mutuelle",                    label: "Mutuelle",                       n1p: ["647"] },
                         ];
-                        const prevRows = chargesKeys.map(({ key, label }) => {
+                        // Mapper les comptes N-1 sur les catégories (chaque compte utilisé une seule fois)
+                        const usedAccounts = new Set<string>();
+                        const n1ByKey: Record<string, number> = {};
+                        chargesKeys.forEach(({ key, n1p }) => {
+                          let s = 0;
+                          chargesExternesDetail.forEach(l => {
+                            if (!usedAccounts.has(l.compte) && n1p.some(p => l.compte.startsWith(p))) {
+                              s += Math.abs(l.montant);
+                              usedAccounts.add(l.compte);
+                            }
+                          });
+                          n1ByKey[key] = s;
+                        });
+                        // Résiduel N-1 non catégorisé
+                        const n1Residuel = chargesExternesDetail.reduce(
+                          (s, l) => s + (usedAccounts.has(l.compte) ? 0 : Math.abs(l.montant)), 0
+                        );
+                        const rows = chargesKeys.map(({ key, label }) => {
                           const vals = (budget.chargesFixes as unknown as Record<string, [number, number, number]>)[key];
-                          const inflated: [number, number, number] = [vals[0], vals[1], vals[2]];
-                          if (inflated[0] === 0 && inflated[1] === 0 && inflated[2] === 0) return null;
+                          const n1Val = n1ByKey[key] ?? 0;
+                          if (vals[0] === 0 && vals[1] === 0 && vals[2] === 0 && n1Val === 0) return null;
                           return (
                             <tr key={key} className="border-b border-border/20">
                               <td className="py-1 pl-8 pr-3 text-xs text-muted-foreground">{label}</td>
-                              {cr && <td />}
-                              {inflated.map((v, i) => (
+                              {cr && (
+                                <td className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                                  {n1Val > 0 ? n1Val.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }) : ""}
+                                </td>
+                              )}
+                              {vals.map((v, i) => (
                                 <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">{eur(v)}</td>
                               ))}
                             </tr>
                           );
                         }).filter((r): r is React.ReactElement => r !== null);
-                        const n1Rows: React.ReactElement[] = chargesExternesDetail.length > 0 ? [
-                          <tr key="n1-ce-sep" className="border-b border-border/10 bg-muted/5">
-                            <td colSpan={cr ? 5 : 4} className="py-0.5 pl-4 text-xs text-muted-foreground italic font-medium">
-                              Détail N-1 (balance comptable)
-                            </td>
-                          </tr>,
-                          ...chargesExternesDetail.map(l => (
-                            <tr key={`n1-ce-${l.compte}`} className="border-b border-border/10 bg-muted/5">
-                              <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                              <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                                {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+                        const residuelRow: React.ReactElement[] = n1Residuel > 0 ? [
+                          <tr key="n1-residuel" className="border-b border-border/20">
+                            <td className="py-1 pl-8 pr-3 text-xs text-muted-foreground italic">Autres charges ext. (N-1 uniquement)</td>
+                            {cr && (
+                              <td className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
+                                {n1Residuel.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
                               </td>
-                              <td /><td /><td />
-                            </tr>
-                          ))
+                            )}
+                            <td /><td /><td />
+                          </tr>
                         ] : [];
-                        return [...prevRows, ...n1Rows];
+                        return [...rows, ...residuelRow];
                       })()}
                       {/* Valeur ajoutée */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/20">
@@ -1889,15 +1861,6 @@ export default function Page() {
                         {cr && <td />}
                         {resultats.chargesSocialesEmployesParAn.map((v, i) => <td key={i} className="py-1 px-2 text-right text-xs tabular-nums text-muted-foreground">{eur(v)}</td>)}
                       </tr>
-                      {expandN1Personnel && personnelDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* Rémunération dirigeant */}
                       <tr className="border-b border-border/30">
                         <td className="py-1.5 pr-3 text-sm">— Rémunération dirigeant</td>
@@ -1916,26 +1879,11 @@ export default function Page() {
                         {resultats.ebeParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
                       </tr>
                       {/* Dotations amortissements */}
-                      <tr
-                        className={`border-b border-border/30${dotationsDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (dotationsDetail.length) setExpandN1Dotations(!expandN1Dotations); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {dotationsDetail.length > 0 && (expandN1Dotations ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          — Dotations amortissements
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Dotations amortissements</td>
                         <N1Cell value={cr?.dotationsAmortissements ?? 0} />
                         {resultats.dotationsAmortissementsParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
                       </tr>
-                      {expandN1Dotations && dotationsDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* Résultat d'exploitation */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/20">
                         <td className="py-1.5 pr-3 text-sm">= Résultat d&apos;exploitation</td>
@@ -1943,26 +1891,11 @@ export default function Page() {
                         {resultats.resultatExploitationParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
                       </tr>
                       {/* Charges financières */}
-                      <tr
-                        className={`border-b border-border/30${financieresDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (financieresDetail.length) setExpandN1Financieres(!expandN1Financieres); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {financieresDetail.length > 0 && (expandN1Financieres ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          — Charges financières
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Charges financières</td>
                         <N1Cell value={cr?.chargesFinancieres ?? 0} />
                         {resultats.chargesFinancieresParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
                       </tr>
-                      {expandN1Financieres && financieresDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* Quote-part subventions invest. */}
                       <tr className="border-b border-border/30">
                         <td className="py-1.5 pr-3 text-sm">+ Quote-part subventions invest.</td>
@@ -1982,47 +1915,17 @@ export default function Page() {
                         {resultats.resultatCourantParAn.map((v, i) => <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${v < 0 ? "text-destructive" : ""}`}>{eur(v)}</td>)}
                       </tr>
                       {/* Produits divers / Autres produits N-1 */}
-                      <tr
-                        className={`border-b border-border/30${autresProduitsDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (autresProduitsDetail.length) setExpandN1AutresProduits(!expandN1AutresProduits); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {autresProduitsDetail.length > 0 && (expandN1AutresProduits ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          + Produits divers
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">+ Produits divers</td>
                         <N1Cell value={cr?.autresProduits ?? 0} />
                         {resultats.produitsDiversParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
                       </tr>
-                      {expandN1AutresProduits && autresProduitsDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {l.montant.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* Charges diverses / Autres charges N-1 */}
-                      <tr
-                        className={`border-b border-border/30${autresChargesDetail.length ? " cursor-pointer hover:bg-muted/10" : ""}`}
-                        onClick={() => { if (autresChargesDetail.length) setExpandN1AutresCharges(!expandN1AutresCharges); }}
-                      >
-                        <td className="py-1.5 pr-3 text-sm flex items-center gap-1">
-                          {autresChargesDetail.length > 0 && (expandN1AutresCharges ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />)}
-                          — Charges diverses
-                        </td>
+                      <tr className="border-b border-border/30">
+                        <td className="py-1.5 pr-3 text-sm">— Charges diverses</td>
                         <N1Cell value={cr?.autresCharges ?? 0} />
                         {resultats.chargesDiversesParAn.map((v, i) => <td key={i} className="py-1.5 px-2 text-right text-sm tabular-nums">{eur(v)}</td>)}
                       </tr>
-                      {expandN1AutresCharges && autresChargesDetail.map(l => (
-                        <tr key={l.compte} className="border-b border-border/10 bg-muted/5">
-                          <td className="py-0.5 pl-10 pr-3 text-xs text-muted-foreground">{l.compte} — {l.intitule}</td>
-                          <td className="py-0.5 px-2 text-right text-xs tabular-nums text-muted-foreground italic">
-                            {Math.abs(l.montant).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
-                          </td>
-                          <td /><td /><td />
-                        </tr>
-                      ))}
                       {/* Résultat net */}
                       <tr className="border-b border-border/30 font-semibold bg-muted/20">
                         <td className="py-1.5 pr-3 text-sm">= Résultat net</td>
@@ -2208,7 +2111,7 @@ export default function Page() {
                     }) => (
                       <tr className={`border-b border-border/30 ${bold ? "font-semibold bg-muted/20" : ""}`}>
                         <td className={`py-1.5 pr-3 text-sm ${sub ? "pl-5 text-xs text-muted-foreground" : ""}`}>{label}</td>
-                        <N1 v={n1} />
+                        {N1(n1)}
                         {values.map((v, i) => (
                           <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${sub ? "text-xs text-muted-foreground" : ""} ${v < 0 ? "text-destructive" : ""}`}>
                             {v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
