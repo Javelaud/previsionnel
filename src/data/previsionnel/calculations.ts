@@ -116,33 +116,97 @@ function getChargesSocialesDirigeant(
 ): T3 {
   const statut = b.infos.statutJuridique;
   const acre = b.infos.acre;
+  const PASS = 47100; // Plafond Annuel Sécurité Sociale 2026
 
-  let taux: T3;
-  if (statut === "Micro-entreprise") {
-    const typeVente = b.infos.typeVente;
-    const tauxBase = typeVente === "Services" ? 0.22 : typeVente === "Marchandises (y compris hébergement et restauration)" ? 0.128 : 0.22;
-    if (acre) {
-      taux = [tauxBase * 0.5, tauxBase * 0.75, tauxBase];
-    } else {
-      taux = [tauxBase, tauxBase, tauxBase];
-    }
-  } else if (statut === "SAS (IS)" || statut === "SASU (IS)") {
-    // Assimilé salarié : ~80% charges
-    if (acre) {
-      taux = [0.40, 0.80, 0.80];
-    } else {
-      taux = [0.80, 0.80, 0.80];
-    }
-  } else {
-    // TNS (EURL, SARL, EI) : ~45% charges
-    if (acre) {
-      taux = [0.23, 0.45, 0.45];
-    } else {
-      taux = [0.45, 0.45, 0.45];
-    }
+  // TNS : cotisations sur rémunération (EURL/SARL IS gérant majoritaire)
+  // Source : Tableau TNS JLJ 2026
+  function tnsCharges(base: number, acreAn1 = false): number {
+    const afMal = acreAn1 ? 0.048 : 0.096;   // AF+Maladie : 50% ACRE an 1
+    const t1    = acreAn1 ? 0.13025 : 0.2605; // Retraite T1 : 50% ACRE an 1
+    return Math.max(1103,
+      Math.min(base, 141300) * 0.0085 +               // IJ maladie
+      base * afMal +                                   // AF + Maladie
+      Math.min(base, PASS) * t1 +                      // Retraite de base T1
+      Math.max(0, Math.min(base, 188400) - PASS) * 0.086 + // Retraite compl T2
+      base * 0.097                                     // CSG-CRDS
+    );
   }
 
-  return remunerationNet.map((r, i) => Math.round(r * taux[i])) as T3;
+  // EI IR : calcul itératif — charges sociales déductibles du bénéfice
+  // Source : Tableau TNS JLJ 2026 — même taux, base = revenu net (bénéfice - charges)
+  function eiIrCharges(beneficeBrut: number, acreAn1 = false): number {
+    let revenuNet = beneficeBrut;
+    for (let iter = 0; iter < 200; iter++) {
+      const afMal = acreAn1 ? 0.048 : 0.096;
+      const t1    = acreAn1 ? 0.13025 : 0.2605;
+      const charges = Math.max(1103,
+        Math.min(revenuNet, 141300) * 0.0085 +
+        revenuNet * afMal +
+        Math.min(revenuNet, PASS) * t1 +
+        Math.max(0, Math.min(revenuNet, 188400) - PASS) * 0.086 +
+        revenuNet * 0.097
+      );
+      const newRevenuNet = beneficeBrut - charges;
+      if (Math.abs(newRevenuNet - revenuNet) < 0.01) return charges;
+      revenuNet = newRevenuNet;
+    }
+    return beneficeBrut - revenuNet;
+  }
+
+  // SASU/SAS : assimilé salarié — cotisations salariales + patronales
+  // Source : Tableau SASU JLJ 2026
+  function sasuCharges(brut: number, acreAn1 = false): number {
+    const T2MAX = 376800; // 8 × PASS
+    const sal =
+      brut * 0.0075 +
+      Math.min(brut, PASS) * 0.069 +
+      brut * 0.004 +
+      Math.min(brut, PASS) * 0.0315 +
+      Math.max(0, Math.min(brut, T2MAX) - PASS) * 0.0864 +
+      brut * 0.9825 * 0.097;
+    const patCore =
+      brut * 0.13 +
+      Math.min(brut, PASS) * 0.0855 +
+      brut * 0.019 +
+      Math.min(brut, PASS) * 0.0472 +
+      Math.max(0, Math.min(brut, T2MAX) - PASS) * 0.1295 +
+      brut * 0.0345;
+    const atFnal = brut * 0.015; // AT (1%) + FNAL (0,5%) — non exonérés ACRE
+    // ACRE an 1 : 50% des charges patronales hors AT/FNAL
+    const pat = acreAn1 ? patCore * 0.5 + atFnal : patCore + atFnal;
+    return sal + pat;
+  }
+
+  if (statut === "Micro-entreprise") {
+    // Taux forfaitaire URSSAF 2026 sur chiffre d'affaires
+    const typeVente = b.infos.typeVente;
+    const tauxBase = typeVente === "Marchandises (y compris hébergement et restauration)"
+      ? 0.123  // BIC marchandises
+      : 0.212; // BIC services (et Mixte)
+    return remunerationNet.map((r, i) =>
+      Math.round(r * tauxBase * (acre && i === 0 ? 0.5 : 1))
+    ) as T3;
+  }
+
+  if (statut === "Entreprise individuelle au réel (IR)") {
+    return remunerationNet.map((r, i) =>
+      Math.round(eiIrCharges(r, acre && i === 0))
+    ) as T3;
+  }
+
+  if (statut === "EURL (IS)" || statut === "SARL (IS)") {
+    return remunerationNet.map((r, i) =>
+      Math.round(tnsCharges(r, acre && i === 0))
+    ) as T3;
+  }
+
+  if (statut === "SAS (IS)" || statut === "SASU (IS)") {
+    return remunerationNet.map((r, i) =>
+      Math.round(sasuCharges(r, acre && i === 0))
+    ) as T3;
+  }
+
+  return remunerationNet.map(() => 0) as T3;
 }
 
 // --- Total charges fixes (hors impôts/taxes) ---
