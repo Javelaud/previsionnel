@@ -94,8 +94,6 @@ function ImporterContent() {
     );
   }
 
-  const cr = budget?.compteResultat;
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 p-6">
       <div className="max-w-lg w-full">
