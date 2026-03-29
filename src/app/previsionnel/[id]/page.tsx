@@ -292,9 +292,6 @@ export default function Page() {
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteUrl, setInviteUrl] = useState("");
   const [inviteCopied, setInviteCopied] = useState(false);
-  const [reponseDialogOpen, setReponseDialogOpen] = useState(false);
-  const [reponseUrl, setReponseUrl] = useState("");
-  const [reponseCopied, setReponseCopied] = useState(false);
   const [isClientMode, setIsClientMode] = useState(false);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<"idle" | "synced" | "syncing">("idle");
@@ -335,7 +332,7 @@ export default function Page() {
     });
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [id]);
 

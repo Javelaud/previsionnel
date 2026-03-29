@@ -9,7 +9,7 @@
  *   updated_at   timestamptz DEFAULT now()
  */
 
-import { supabase } from "./supabase";
+import { supabase, supabaseConfigured } from "./supabase";
 import type { BudgetPrevisionnel } from "@/data/previsionnel/types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
@@ -24,6 +24,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 export async function upsertBudget(
   budget: BudgetPrevisionnel
 ): Promise<string | null> {
+  if (!supabaseConfigured) return null;
   const { data, error } = await supabase
     .from("budgets")
     .upsert(
@@ -53,6 +54,7 @@ export async function upsertBudget(
 export async function fetchBudgetById(
   budgetId: string
 ): Promise<BudgetPrevisionnel | null> {
+  if (!supabaseConfigured) return null;
   const { data, error } = await supabase
     .from("budgets")
     .select("data")
@@ -72,6 +74,7 @@ export async function fetchBudgetByToken(token: string): Promise<{
   clientId: string;
   shareToken: string;
 } | null> {
+  if (!supabaseConfigured) return null;
   const { data, error } = await supabase
     .from("budgets")
     .select("data, client_id, share_token")
@@ -98,7 +101,8 @@ export async function fetchBudgetByToken(token: string): Promise<{
 export function subscribeToBudget(
   budgetId: string,
   onUpdate: (budget: BudgetPrevisionnel) => void
-): RealtimeChannel {
+): RealtimeChannel | null {
+  if (!supabaseConfigured) return null;
   return supabase
     .channel(`budget_${budgetId}`)
     .on(
