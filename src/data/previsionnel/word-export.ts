@@ -101,12 +101,14 @@ function cell(
     width:    { size: widthDxa, type: WidthType.DXA },
     shading:  opts?.shade ? { fill: opts.shade, type: ShadingType.CLEAR } : undefined,
     borders:  opts?.borders ?? cellBorders(),
-    verticalAlign: opts?.vAlign ?? VerticalAlign.CENTER,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    verticalAlign: (opts?.vAlign ?? VerticalAlign.CENTER) as any,
     columnSpan: opts?.span,
     margins:  { top: 60, bottom: 60, left: 100, right: 100 },
     children: [
       new Paragraph({
-        alignment: opts?.align ?? AlignmentType.LEFT,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        alignment: (opts?.align ?? AlignmentType.LEFT) as any,
         children: [txt(content, { bold: opts?.bold, size: opts?.size ?? 18, color: opts?.color, italics: opts?.italic })],
       }),
     ],
