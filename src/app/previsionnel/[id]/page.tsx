@@ -2227,12 +2227,13 @@ export default function Page() {
                 <CardContent>
                   {(() => {
                     const bn = budget.balanceNmoins1;
-                    // Calculs N-1 pour affichage colonne (actif & passif doivent s'équilibrer)
+                    // Total actif N-1 (toutes les grandes masses)
                     const actifN1Total = bn
-                      ? bn.immobilisationsNettes + bn.stocks + bn.creancesClients + bn.tresorerie
+                      ? bn.immobilisationsNettes + bn.stocks + bn.creancesClients + (bn.autresCreances ?? 0) + bn.tresorerie
                       : 0;
-                    const autresDettesCTN1 = bn
-                      ? Math.max(0, actifN1Total - bn.capitauxPropres - bn.dettesFinancieresLT - bn.dettesFournisseurs)
+                    // Total passif N-1 (CP + provisions + dettes LT + dettes fourn + autres CT)
+                    const passifN1Total = bn
+                      ? bn.capitauxPropres + (bn.provisions ?? 0) + bn.dettesFinancieresLT + bn.dettesFournisseurs + bn.autresDettesCT
                       : 0;
                     // Helper cellule N-1
                     const N1 = (v: number) => bn ? (
@@ -2241,17 +2242,19 @@ export default function Page() {
                       </td>
                     ) : null;
                     // Helper ligne de bilan
-                    const BR = ({ label, n1, values, bold, sub }: {
-                      label: string; n1: number; values: [number, number, number]; bold?: boolean; sub?: boolean;
+                    const BR = ({ label, n1, values, bold, sub, n1only }: {
+                      label: string; n1: number; values?: [number, number, number]; bold?: boolean; sub?: boolean; n1only?: boolean;
                     }) => (
                       <tr className={`border-b border-border/30 ${bold ? "font-semibold bg-muted/20" : ""}`}>
                         <td className={`py-1.5 pr-3 text-sm ${sub ? "pl-5 text-xs text-muted-foreground" : ""}`}>{label}</td>
                         {N1(n1)}
-                        {values.map((v, i) => (
+                        {n1only ? (
+                          <td colSpan={3} className="py-1.5 px-2 text-xs text-muted-foreground italic text-center">—</td>
+                        ) : values ? values.map((v, i) => (
                           <td key={i} className={`py-1.5 px-2 text-right text-sm tabular-nums ${sub ? "text-xs text-muted-foreground" : ""} ${v < 0 ? "text-destructive" : ""}`}>
                             {v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
                           </td>
-                        ))}
+                        )) : null}
                       </tr>
                     );
                     const headers = (
@@ -2271,16 +2274,21 @@ export default function Page() {
                       <table className="w-full">
                         <thead>{headers}</thead>
                         <tbody>
-                          <BR label="Immobilisations nettes"
+                          <BR label="Immobilisations nettes (2x)"
                             n1={bn?.immobilisationsNettes ?? 0}
                             values={resultats.bilanActifImmobilisationsNettes} />
-                          <BR label="Stocks"
+                          <BR label="Stocks (3x)"
                             n1={bn?.stocks ?? 0}
                             values={resultats.bilanActifStocks} />
-                          <BR label="Créances clients"
+                          <BR label="Créances clients (41x)"
                             n1={bn?.creancesClients ?? 0}
                             values={resultats.bilanActifCreances} />
-                          <BR label="Trésorerie (disponibilités)"
+                          {bn && (bn.autresCreances ?? 0) > 0 && (
+                            <BR label="Autres créances (avances, TVA déd., CCA…)"
+                              n1={bn.autresCreances ?? 0}
+                              n1only />
+                          )}
+                          <BR label="Trésorerie (5x)"
                             n1={bn?.tresorerie ?? 0}
                             values={resultats.bilanActifTresorerie} />
                           <BR label="Total Actif"
@@ -2295,7 +2303,7 @@ export default function Page() {
                       <table className="w-full">
                         <thead>{headers}</thead>
                         <tbody>
-                          <BR label="Capitaux propres"
+                          <BR label="Capitaux propres (10x-14x)"
                             n1={bn?.capitauxPropres ?? 0}
                             values={resultats.bilanPassifCapitauxPropres} bold />
                           <BR label="dont Capital & Réserves (début)"
@@ -2304,17 +2312,22 @@ export default function Page() {
                           <BR label="dont Résultat de l'exercice"
                             n1={bn?.compteResultat.resultatNet ?? 0}
                             values={resultats.resultatNetParAn} sub />
-                          <BR label="Dettes financières LT"
+                          {bn && (bn.provisions ?? 0) > 0 && (
+                            <BR label="Provisions pour risques (15x)"
+                              n1={bn.provisions ?? 0}
+                              n1only />
+                          )}
+                          <BR label="Dettes financières LT (16x)"
                             n1={bn?.dettesFinancieresLT ?? 0}
                             values={resultats.bilanPassifDettesLT} />
-                          <BR label="Dettes fournisseurs"
+                          <BR label="Dettes fournisseurs (40x)"
                             n1={bn?.dettesFournisseurs ?? 0}
                             values={resultats.bilanPassifDettesFournisseurs} />
-                          <BR label="Autres dettes CT (fiscal, social…)"
-                            n1={autresDettesCTN1}
+                          <BR label="Autres dettes CT (social, fiscal, associés…)"
+                            n1={bn?.autresDettesCT ?? 0}
                             values={resultats.bilanPassifAutresDettesCT} />
                           <BR label="Total Passif"
-                            n1={actifN1Total}
+                            n1={passifN1Total}
                             values={resultats.bilanPassifTotal} bold />
                         </tbody>
                       </table>
@@ -2323,7 +2336,7 @@ export default function Page() {
                     );
                   })()}
                   <p className="text-[10px] text-muted-foreground mt-3">
-                    Bilan simplifié calculé sur la base des hypothèses du prévisionnel. Les capitaux propres de départ intègrent le bilan N-1 si importé. Les &laquo;&nbsp;Autres dettes CT&nbsp;&raquo; regroupent TVA collectée nette, charges sociales à payer, IS, etc. Hors crédit-bail et provisions.
+                    Bilan N-1 issu de la balance importée (PCG : 2x immob., 3x stocks, 41x créances clients, 4x autres créances, 5x trésorerie / 10-14x CP, 15x provisions, 16x dettes LT, 40x fourn., 42-49x autres dettes CT). Les colonnes An 1-3 sont les projections prévisionnelles.
                   </p>
                 </CardContent>
               </Card>

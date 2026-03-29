@@ -121,42 +121,65 @@ export async function parseBalanceXlsx(buffer: ArrayBuffer): Promise<BalanceNmoi
   // ── BILAN N-1 (colonnes D_debut / C_debut) ───────────────────────────────
 
   // Actif
-  const immoBrutes = actifDeb(["21", "22", "23", "26", "27"]);
-  const amortissements = passifDeb(["28"]);
+  // Immobilisations : toute la classe 2 (incorp. 20x, corp. 21-25x, financ. 26-27x)
+  // moins amortissements (28x) et dépréciations (29x)
+  const immoBrutes = actifDeb(["20", "21", "22", "23", "24", "25", "26", "27"]);
+  const amortissements = passifDeb(["28", "29"]);
   const immobilisationsNettes = Math.max(0, immoBrutes - amortissements);
 
-  // Stocks nets (37x brut - 39x provisions)
-  const stocksBrut = actifDeb(["31", "32", "33", "34", "35", "36", "37"]);
+  // Stocks nets : toute la classe 3 (30x-37x) moins dépréciations (39x)
+  const stocksBrut = actifDeb(["30", "31", "32", "33", "34", "35", "36", "37"]);
   const stocksProv = passifDeb(["39"]);
   const stocks = Math.max(0, stocksBrut - stocksProv);
 
-  // Créances clients nettes (41x débit - 419x crédit)
-  const creancesBrut = actifDeb(["411", "413", "416"]);
+  // Créances clients nettes : 41x débit − 419x crédit (avances reçues de clients)
+  const creancesBrut = actifDeb(["41"]);
   const avancesClientsRecues = passifDeb(["419"]);
   const creancesClients = Math.max(0, creancesBrut - avancesClientsRecues);
 
-  // Trésorerie (51x + 508 valeurs mobilières)
-  const tresorerie = actifDeb(["508", "51", "53"]);
+  // Autres créances actif : avances fournisseurs (409x) + créances fiscales/sociales/diverses
+  // (42x-49x soldes débiteurs, dont 444x IS avance, 445x TVA déductible, 486x CCA, 45x associés débiteurs…)
+  const autresCreances = actifDeb([
+    "409",
+    "42", "43", "44", "45", "46", "47", "48", "49",
+  ]);
+
+  // Trésorerie : toute la classe 5 (VMP 50x, banques 51x, caisse 53x, etc.)
+  const tresorerie = actifDeb(["50", "51", "52", "53", "54", "55", "56", "57", "58"]);
 
   // Passif
-  // Capitaux propres nets (10x, 11x, 12x, 13x : créditeurs = CP)
-  // Note : compte 139x est débiteur (inscription en cpte de résultat) → réduit CP
-  const cpBrut = passifDeb(["101", "102", "104", "106", "107", "110", "111", "112", "113", "114", "115", "119", "120", "121", "129", "130", "131", "132", "134"]);
+  // Capitaux propres nets (10x-14x créditeurs, moins 139x débiteur)
+  // 14x = provisions réglementées (réserves fiscales incluses dans CP en France)
+  const cpBrut = passifDeb([
+    "101", "102", "104", "106", "107",
+    "110", "111", "112", "113", "114", "115", "119",
+    "120", "121", "129",
+    "130", "131", "132", "134",
+    "14",
+  ]);
   const cpReductions = actifDeb(["139"]);
   const capitauxPropres = Math.max(0, cpBrut - cpReductions);
 
-  // Dettes financières LT (emprunts classe 164x, 163x, 168x)
-  const dettesFinancieresLT = passifDeb(["163", "164", "165", "166", "167", "168"]);
+  // Provisions pour risques et charges (15x) — hors CP
+  const provisions = passifDeb(["15"]);
 
-  // Dettes fournisseurs (401, 408)
-  const dettesFournisseursCredits = passifDeb(["401", "408"]);
-  const avancesFournisseurs = actifDeb(["409"]);
-  const dettesFournisseurs = Math.max(0, dettesFournisseursCredits - avancesFournisseurs);
+  // Dettes financières LT (emprunts classe 16x)
+  const dettesFinancieresLT = passifDeb(["16"]);
 
-  // Autres dettes CT (42x, 43x, 44x hors créances, 45x, 46x)
-  const autresDettesCT = passifDeb(["421", "422", "423", "425", "426", "427", "428",
-    "431", "437", "438", "441", "442", "443", "444", "445", "446", "447", "448",
-    "455", "456", "457", "458", "462", "464"]);
+  // Dettes fournisseurs (401x, 403x, 404x, 408x) — NON nettées avec les avances 409x
+  // Les avances versées aux fournisseurs (409x) sont en actif (autresCreances)
+  const dettesFournisseurs = passifDeb(["401", "403", "404", "408"]);
+
+  // Autres dettes CT : dettes sociales (42x-43x), fiscales (44x-45x), associés (455x),
+  // produits constatés d'avance (487x) et autres (46x-49x créditeurs)
+  const autresDettesCT = passifDeb([
+    "421", "422", "423", "424", "425", "426", "427", "428",
+    "431", "437", "438",
+    "441", "442", "443", "444", "445", "446", "447", "448",
+    "455", "456", "457", "458",
+    "462", "464",
+    "483", "485", "487",
+  ]);
 
   // ── COMPTE DE RÉSULTAT N (colonnes D_fin / C_fin) ────────────────────────
   // Nota : les comptes de classe 6 et 7 ont un solde nul à l'ouverture (réinitialisation annuelle)
@@ -218,8 +241,10 @@ export async function parseBalanceXlsx(buffer: ArrayBuffer): Promise<BalanceNmoi
     immobilisationsNettes,
     stocks,
     creancesClients,
+    autresCreances,
     tresorerie,
     capitauxPropres,
+    provisions,
     dettesFinancieresLT,
     dettesFournisseurs,
     autresDettesCT,

@@ -180,8 +180,10 @@ export interface BalanceNmoins1 {
   immobilisationsNettes: number;
   stocks: number;
   creancesClients: number;
+  autresCreances: number;      // avances fourn. (409x) + créances diverses (42x-49x débit, 48x CCA)
   tresorerie: number;
   capitauxPropres: number;
+  provisions: number;          // provisions pour risques et charges (15x)
   dettesFinancieresLT: number;
   dettesFournisseurs: number;
   autresDettesCT: number;
