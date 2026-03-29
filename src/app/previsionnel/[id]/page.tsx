@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown, Upload, X, Send, Link2, Copy, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -35,6 +35,7 @@ import { exportToExcel } from "@/data/previsionnel/excel-export";
 import { SECTEURS_ACTIVITES, TOUTES_ACTIVITES } from "@/data/previsionnel/activites-ape";
 import { RATIOS_SECTORIELS, getStatutRatio, type StatutRatio } from "@/data/previsionnel/ratios-sectoriels";
 import { useEquilibre } from "@/contexts/equilibre-context";
+import { buildInviteUrl, buildReponseUrl } from "@/lib/share";
 
 // ---- Helpers ----
 
@@ -287,17 +288,30 @@ export default function Page() {
   const [expandImpotsTaxes, setExpandImpotsTaxes] = useState(false);
   const [fecImportStatus, setFecImportStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [fecImportMessage, setFecImportMessage] = useState<string>("");
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [reponseDialogOpen, setReponseDialogOpen] = useState(false);
+  const [reponseUrl, setReponseUrl] = useState("");
+  const [reponseCopied, setReponseCopied] = useState(false);
+  const [isClientMode, setIsClientMode] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const client = getClient(id);
     if (client) setClientNom(client.nom);
     const budgets = getBudgetsForClient(id);
+    let activeBudget: BudgetPrevisionnel;
     if (budgets.length > 0) {
-      setBudget(budgets[0]);
+      activeBudget = budgets[0];
+      setBudget(activeBudget);
     } else {
-      const newBudget = createNewBudget(id);
-      setBudget(newBudget);
+      activeBudget = createNewBudget(id);
+      setBudget(activeBudget);
+    }
+    // Détecter le mode client (arrivé via un lien de partage)
+    if (typeof window !== "undefined" && sessionStorage.getItem(`client_mode_${activeBudget.id}`)) {
+      setIsClientMode(true);
     }
   }, [id]);
 
@@ -350,6 +364,7 @@ export default function Page() {
   }));
 
   return (
+    <>
     <div className="p-6 max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -375,6 +390,22 @@ export default function Page() {
               <span className="text-xs text-green-600 flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" /> Sauvegardé
               </span>
+            )}
+            {/* Bouton "Envoyer mes réponses" — visible en mode client */}
+            {isClientMode && (
+              <Button
+                size="sm"
+                className="gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-md hover:shadow-lg transition-all"
+                onClick={() => {
+                  const url = buildReponseUrl(budget);
+                  setReponseUrl(url);
+                  setReponseCopied(false);
+                  setReponseDialogOpen(true);
+                }}
+              >
+                <Send className="h-4 w-4" />
+                Envoyer mes réponses
+              </Button>
             )}
             <Button
               variant="outline"
@@ -468,11 +499,29 @@ export default function Page() {
                   />
                 </FieldRow>
                 <FieldRow label="Email">
-                  <Input
-                    value={budget.infos.email}
-                    onChange={(e) => updateBudget({ infos: { email: e.target.value } })}
-                    placeholder="contact@example.com"
-                  />
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      value={budget.infos.email}
+                      onChange={(e) => updateBudget({ infos: { email: e.target.value } })}
+                      placeholder="contact@example.com"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 gap-1.5 border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-400 dark:hover:bg-indigo-950"
+                      onClick={() => {
+                        const url = buildInviteUrl(budget);
+                        setInviteUrl(url);
+                        setInviteCopied(false);
+                        setInviteDialogOpen(true);
+                      }}
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                      Inviter le client
+                    </Button>
+                  </div>
                 </FieldRow>
                 <FieldRow label="Ville">
                   <Input
@@ -2498,5 +2547,121 @@ export default function Page() {
           </TabsContent>
         </Tabs>
     </div>
+
+    {/* Dialog — Inviter un client */}
+    <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Link2 className="h-5 w-5 text-indigo-600" />
+            Inviter {clientNom || "le client"} à compléter son dossier
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 py-2">
+          <p className="text-sm text-muted-foreground">
+            Partagez ce lien avec votre client. Il pourra ouvrir le dossier sur son propre
+            appareil, le compléter, puis vous renvoyer ses réponses en un clic.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              value={inviteUrl}
+              className="text-xs font-mono bg-muted"
+              onFocus={(e) => e.target.select()}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1.5"
+              onClick={() => {
+                navigator.clipboard.writeText(inviteUrl);
+                setInviteCopied(true);
+                setTimeout(() => setInviteCopied(false), 3000);
+              }}
+            >
+              {inviteCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+              {inviteCopied ? "Copié !" : "Copier"}
+            </Button>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground flex flex-col gap-1">
+            <p>📋 <strong>Étape 1 :</strong> Copiez et envoyez ce lien à votre client (email, WhatsApp…)</p>
+            <p>✏️ <strong>Étape 2 :</strong> Le client remplit son dossier sur son appareil</p>
+            <p>📥 <strong>Étape 3 :</strong> Le client clique &quot;Envoyer mes réponses&quot; et vous envoie le lien retour</p>
+            <p>✅ <strong>Étape 4 :</strong> Vous ouvrez ce lien retour pour importer ses réponses</p>
+          </div>
+          {budget.infos.email && (
+            <Button
+              className="gap-2 w-full"
+              onClick={() => {
+                const subject = encodeURIComponent(`Votre dossier prévisionnel — ${budget.infos.intituleProjet || budget.infos.prenomNom}`);
+                const body = encodeURIComponent(
+                  `Bonjour,\n\nJe vous invite à compléter votre dossier prévisionnel en cliquant sur le lien ci-dessous :\n\n${inviteUrl}\n\nUne fois terminé, cliquez sur "Envoyer mes réponses" pour me les transmettre.\n\nCordialement`
+                );
+                window.open(`mailto:${budget.infos.email}?subject=${subject}&body=${body}`);
+              }}
+            >
+              <Send className="h-4 w-4" />
+              Ouvrir dans ma messagerie
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Dialog — Envoyer mes réponses (mode client) */}
+    <Dialog open={reponseDialogOpen} onOpenChange={setReponseDialogOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Send className="h-5 w-5 text-green-600" />
+            Envoyer mes réponses à mon conseiller
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 py-2">
+          <p className="text-sm text-muted-foreground">
+            Copiez ce lien et envoyez-le à votre conseiller (par email, WhatsApp, SMS…).
+            Il pourra importer vos réponses en l&apos;ouvrant.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              value={reponseUrl}
+              className="text-xs font-mono bg-muted"
+              onFocus={(e) => e.target.select()}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1.5"
+              onClick={() => {
+                navigator.clipboard.writeText(reponseUrl);
+                setReponseCopied(true);
+                setTimeout(() => setReponseCopied(false), 3000);
+              }}
+            >
+              {reponseCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+              {reponseCopied ? "Copié !" : "Copier"}
+            </Button>
+          </div>
+          {budget.infos.email && (
+            <Button
+              variant="outline"
+              className="gap-2 w-full"
+              onClick={() => {
+                const subject = encodeURIComponent(`Mes réponses — dossier prévisionnel`);
+                const body = encodeURIComponent(
+                  `Bonjour,\n\nJ'ai complété mon dossier prévisionnel. Voici le lien pour importer mes réponses :\n\n${reponseUrl}\n\nCordialement`
+                );
+                window.open(`mailto:${budget.infos.email}?subject=${subject}&body=${body}`);
+              }}
+            >
+              <Send className="h-4 w-4" />
+              Envoyer par email à mon conseiller
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }
