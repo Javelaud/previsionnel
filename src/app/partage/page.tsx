@@ -78,6 +78,7 @@ function PartageContent() {
       }
       saveBudget(budget);
       sessionStorage.setItem(`client_mode_${budget.id}`, "1");
+      sessionStorage.setItem("previsionnel_client_mode", "1");
       router.push(`/previsionnel/${clientId}`);
 
     } else if (legacyToken) {
@@ -96,6 +97,7 @@ function PartageContent() {
       }
       saveBudget(budget);
       sessionStorage.setItem(`client_mode_${budget.id}`, "1");
+      sessionStorage.setItem("previsionnel_client_mode", "1");
       router.push(`/previsionnel/${budget.clientId}`);
     }
   }

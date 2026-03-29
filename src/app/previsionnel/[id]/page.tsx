@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown, Upload, X, Send, Link2, Copy, Check } from "lucide-react";
+import { ArrowLeft, Download, Save, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, CalendarRange, ChevronRight, ChevronDown, Upload, X, Send, Link2, Copy, Check, LogOut } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -266,6 +266,7 @@ type DeepPartial<T> = {
 
 export default function Page() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
   const [budget, setBudget] = useState<BudgetPrevisionnel | null>(null);
   const [clientNom, setClientNom] = useState<string>("");
@@ -392,15 +393,23 @@ export default function Page() {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/previsionnel">
-              <Button variant="ghost" size="sm" className="gap-1">
-                <ArrowLeft className="h-4 w-4" />
-                Retour
-              </Button>
-            </Link>
+            {!isClientMode && (
+              <Link href="/previsionnel">
+                <Button variant="ghost" size="sm" className="gap-1">
+                  <ArrowLeft className="h-4 w-4" />
+                  Retour
+                </Button>
+              </Link>
+            )}
             <div>
-              <h1 className="text-2xl font-bold">{clientNom || "Client"}</h1>
-              <p className="text-sm text-muted-foreground">{budget.infos.intituleProjet || "Budget prévisionnel"}</p>
+              <h1 className="text-2xl font-bold">
+                {isClientMode ? "Votre dossier prévisionnel" : (clientNom || "Client")}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {isClientMode
+                  ? (budget.infos.prenomNom || budget.infos.intituleProjet || "")
+                  : (budget.infos.intituleProjet || "Budget prévisionnel")}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -424,15 +433,48 @@ export default function Page() {
                 {syncStatus === "synced" ? "Réponses synchronisées ✓" : "Synchronisé avec votre conseiller"}
               </div>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => exportToExcel(budget, resultats)}
-            >
-              <Download className="h-4 w-4" />
-              Exporter Excel
-            </Button>
+            {!isClientMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => exportToExcel(budget, resultats)}
+              >
+                <Download className="h-4 w-4" />
+                Exporter Excel
+              </Button>
+            )}
+            {/* Bouton déconnexion — admin */}
+            {!isClientMode && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2 text-muted-foreground hover:text-destructive"
+                onClick={() => router.push("/previsionnel")}
+              >
+                <LogOut className="h-4 w-4" />
+                Déconnexion
+              </Button>
+            )}
+            {/* Bouton déconnexion — client */}
+            {isClientMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 text-muted-foreground hover:text-destructive"
+                onClick={() => {
+                  // Effacer le mode client
+                  sessionStorage.removeItem("previsionnel_client_mode");
+                  Object.keys(sessionStorage)
+                    .filter((k) => k.startsWith("client_mode_"))
+                    .forEach((k) => sessionStorage.removeItem(k));
+                  router.push("/");
+                }}
+              >
+                <LogOut className="h-4 w-4" />
+                Se déconnecter
+              </Button>
+            )}
           </div>
         </div>
 
@@ -584,7 +626,7 @@ export default function Page() {
                 {/* Section Balance N-1 (société en activité) */}
                 <p className="text-sm font-medium mb-2">Société en activité — Balance N-1</p>
                 <p className="text-xs text-muted-foreground mb-3">
-                  Si votre entreprise est déjà en activité, importez votre balance comptable N-1 au format FEC (DGFIP)
+                  Si votre entreprise est déjà en activité, importez votre balance comptable N-1
                   pour initialiser la trésorerie de départ, le BFR et afficher un compte de résultat N-1.
                 </p>
                 <div className="flex flex-col gap-2">
@@ -614,7 +656,7 @@ export default function Page() {
                       <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
                       <div className="flex-1">
                         <span className="text-sm text-muted-foreground">
-                          {fecImportStatus === "loading" ? "Import en cours…" : "Importer une balance (.xlsx) ou un FEC (.txt)"}
+                          {fecImportStatus === "loading" ? "Import en cours…" : "Importer une balance (.xlsx)"}
                         </span>
                         <p className="text-xs text-muted-foreground">Format privilégié : balance comptable Excel (Sage, Cegid, EBP…)</p>
                       </div>
