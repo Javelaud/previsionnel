@@ -161,11 +161,11 @@ function sectionTitle(label: string): Paragraph {
 // ---------------------------------------------------------------------------
 // PAGE 1 — Couverture / Informations générales
 // ---------------------------------------------------------------------------
-function buildCoverPage(b: BudgetPrevisionnel, r: ResultatsPrevisionnel): Paragraph[] {
+function buildCoverPage(b: BudgetPrevisionnel, r: ResultatsPrevisionnel): (Paragraph | Table)[] {
   const { infos } = b;
   const anneeDebut = new Date().getFullYear();
 
-  const paragraphs: Paragraph[] = [];
+  const paragraphs: (Paragraph | Table)[] = [];
 
   // Bloc titre principal (fond bleu simulé via un tableau pleine largeur)
   paragraphs.push(new Paragraph({
@@ -285,8 +285,8 @@ function buildCoverPage(b: BudgetPrevisionnel, r: ResultatsPrevisionnel): Paragr
 // ---------------------------------------------------------------------------
 // PAGE 2 — Compte de résultat sur 3 ans
 // ---------------------------------------------------------------------------
-function buildCompteResultat(r: ResultatsPrevisionnel): Paragraph[] {
-  const paragraphs: Paragraph[] = [sectionTitle("Compte de résultat prévisionnel")];
+function buildCompteResultat(r: ResultatsPrevisionnel): (Paragraph | Table)[] {
+  const paragraphs: (Paragraph | Table)[] = [sectionTitle("Compte de résultat prévisionnel")];
 
   const W  = CONTENT_W;
   const c0 = Math.round(W * 0.44);
@@ -358,8 +358,8 @@ function buildCompteResultat(r: ResultatsPrevisionnel): Paragraph[] {
 // ---------------------------------------------------------------------------
 // PAGE 3 — Plan de financement
 // ---------------------------------------------------------------------------
-function buildPlanFinancement(b: BudgetPrevisionnel): Paragraph[] {
-  const paragraphs: Paragraph[] = [sectionTitle("Plan de financement initial")];
+function buildPlanFinancement(b: BudgetPrevisionnel): (Paragraph | Table)[] {
+  const paragraphs: (Paragraph | Table)[] = [sectionTitle("Plan de financement initial")];
   const W = CONTENT_W;
 
   const { besoins, financement } = b;
@@ -464,8 +464,8 @@ function buildPlanFinancement(b: BudgetPrevisionnel): Paragraph[] {
 // ---------------------------------------------------------------------------
 // PAGE 4 — Bilan prévisionnel sur 3 ans
 // ---------------------------------------------------------------------------
-function buildBilan(r: ResultatsPrevisionnel): Paragraph[] {
-  const paragraphs: Paragraph[] = [sectionTitle("Bilan prévisionnel")];
+function buildBilan(r: ResultatsPrevisionnel): (Paragraph | Table)[] {
+  const paragraphs: (Paragraph | Table)[] = [sectionTitle("Bilan prévisionnel")];
   const W = CONTENT_W;
   const c0 = Math.round(W * 0.42);
   const cx = Math.round((W - c0) / 3);
@@ -532,8 +532,8 @@ function buildBilan(r: ResultatsPrevisionnel): Paragraph[] {
 // ---------------------------------------------------------------------------
 // PAGE 5 — Trésorerie mensuelle An 1
 // ---------------------------------------------------------------------------
-function buildTresorerie(r: ResultatsPrevisionnel): Paragraph[] {
-  const paragraphs: Paragraph[] = [sectionTitle("Plan de trésorerie mensuel — Année 1")];
+function buildTresorerie(r: ResultatsPrevisionnel): (Paragraph | Table)[] {
+  const paragraphs: (Paragraph | Table)[] = [sectionTitle("Plan de trésorerie mensuel — Année 1")];
 
   const W = CONTENT_W;
   const labelW = Math.round(W * 0.22);
