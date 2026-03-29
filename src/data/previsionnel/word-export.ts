@@ -88,10 +88,10 @@ function cell(
   opts?: {
     bold?: boolean;
     size?: number;
-    align?: AlignmentType;
+    align?: string;
     shade?: string;
     color?: string;
-    vAlign?: VerticalAlign;
+    vAlign?: string;
     italic?: boolean;
     span?: number;
     borders?: ReturnType<typeof cellBorders>;
