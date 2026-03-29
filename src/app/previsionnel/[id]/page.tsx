@@ -32,6 +32,7 @@ import {
   analysePret,
 } from "@/data/previsionnel/calculations";
 import { exportToExcel } from "@/data/previsionnel/excel-export";
+import { exportToWord } from "@/data/previsionnel/word-export";
 import { SECTEURS_ACTIVITES, TOUTES_ACTIVITES } from "@/data/previsionnel/activites-ape";
 import { RATIOS_SECTORIELS, getStatutRatio, type StatutRatio } from "@/data/previsionnel/ratios-sectoriels";
 import { useEquilibre } from "@/contexts/equilibre-context";
@@ -442,6 +443,17 @@ export default function Page() {
               >
                 <Download className="h-4 w-4" />
                 Exporter Excel
+              </Button>
+            )}
+            {!isClientMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => exportToWord(budget, resultats)}
+              >
+                <Download className="h-4 w-4" />
+                Exporter Word
               </Button>
             )}
             {/* Bouton déconnexion — admin */}
