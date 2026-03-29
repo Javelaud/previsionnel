@@ -3,16 +3,20 @@
 /**
  * Page /partage — landing client
  *
- * Flow :
- * 1. Le conseiller génère un lien "Inviter un client" → URL contenant le dossier encodé (?d=...)
- * 2. Le client ouvre ce lien → cette page décode les données
- * 3. Les données sont sauvegardées dans le localStorage du client
- * 4. Le client est redirigé vers le prévisionnel normal (/previsionnel/[clientId])
- * 5. Dans le prévisionnel, un bouton "Envoyer mes réponses" génère un lien de retour
+ * Nouveau flow (Supabase) :
+ * 1. Le conseiller génère un lien "Inviter le client" → /partage?token=<share_token>
+ * 2. Le client ouvre ce lien → on charge le budget depuis Supabase via le token
+ * 3. Le budget est copié dans le localStorage du client
+ * 4. Le client est redirigé vers /previsionnel/[clientId]
+ * 5. Les modifications du client se synchronisent en temps réel avec le conseiller
+ *
+ * Rétrocompatibilité : si le lien contient ?d= (ancien format), on bascule
+ * sur le décodage base64 existant.
  */
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { fetchBudgetByToken } from "@/lib/db";
 import { decodeBudget } from "@/lib/share";
 import { saveClient, saveBudget, getClient } from "@/data/previsionnel/storage";
 import type { Client } from "@/data/previsionnel/types";
@@ -23,42 +27,77 @@ function PartageContent() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [nomClient, setNomClient] = useState("");
   const [token, setToken] = useState<string | null>(null);
+  const [legacyToken, setLegacyToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const d = searchParams.get("d");
-    if (!d) { setStatus("error"); return; }
-    const budget = decodeBudget(d);
-    if (!budget) { setStatus("error"); return; }
-    setNomClient(budget.infos.prenomNom || budget.infos.intituleProjet || "votre dossier");
-    setToken(d);
-    setStatus("ready");
+    async function init() {
+      const shareToken = searchParams.get("token");
+      const legacyD = searchParams.get("d");
+
+      if (shareToken) {
+        // Nouveau flow Supabase
+        const result = await fetchBudgetByToken(shareToken);
+        if (!result) { setStatus("error"); return; }
+        setNomClient(
+          result.budget.infos.prenomNom ||
+          result.budget.infos.intituleProjet ||
+          "votre dossier"
+        );
+        setToken(shareToken);
+        setStatus("ready");
+      } else if (legacyD) {
+        // Ancien flow (lien avec données encodées)
+        const budget = decodeBudget(legacyD);
+        if (!budget) { setStatus("error"); return; }
+        setNomClient(budget.infos.prenomNom || budget.infos.intituleProjet || "votre dossier");
+        setLegacyToken(legacyD);
+        setStatus("ready");
+      } else {
+        setStatus("error");
+      }
+    }
+    init();
   }, [searchParams]);
 
-  function handleCommencer() {
-    if (!token) return;
-    const budget = decodeBudget(token);
-    if (!budget) return;
+  async function handleCommencer() {
+    if (token) {
+      // Nouveau flow : charger le budget depuis Supabase
+      const result = await fetchBudgetByToken(token);
+      if (!result) return;
+      const { budget, clientId } = result;
 
-    // Créer le client dans le localStorage si absent
-    if (!getClient(budget.clientId)) {
-      const client: Client = {
-        id: budget.clientId,
-        nom: budget.infos.prenomNom || budget.infos.intituleProjet || "Client",
-        email: budget.infos.email || "",
-        telephone: budget.infos.telephone || "",
-        dateCreation: new Date().toISOString(),
-      };
-      saveClient(client);
+      if (!getClient(clientId)) {
+        const client: Client = {
+          id: clientId,
+          nom: budget.infos.prenomNom || budget.infos.intituleProjet || "Client",
+          email: budget.infos.email || "",
+          telephone: budget.infos.telephone || "",
+          dateCreation: new Date().toISOString(),
+        };
+        saveClient(client);
+      }
+      saveBudget(budget);
+      sessionStorage.setItem(`client_mode_${budget.id}`, "1");
+      router.push(`/previsionnel/${clientId}`);
+
+    } else if (legacyToken) {
+      // Ancien flow
+      const budget = decodeBudget(legacyToken);
+      if (!budget) return;
+      if (!getClient(budget.clientId)) {
+        const client: Client = {
+          id: budget.clientId,
+          nom: budget.infos.prenomNom || budget.infos.intituleProjet || "Client",
+          email: budget.infos.email || "",
+          telephone: budget.infos.telephone || "",
+          dateCreation: new Date().toISOString(),
+        };
+        saveClient(client);
+      }
+      saveBudget(budget);
+      sessionStorage.setItem(`client_mode_${budget.id}`, "1");
+      router.push(`/previsionnel/${budget.clientId}`);
     }
-
-    // Sauvegarder le budget dans le localStorage du client
-    saveBudget(budget);
-
-    // Marquer comme "mode client" pour afficher le bouton "Envoyer mes réponses"
-    sessionStorage.setItem(`client_mode_${budget.id}`, "1");
-
-    // Rediriger vers le prévisionnel
-    router.push(`/previsionnel/${budget.clientId}`);
   }
 
   if (status === "loading") {
@@ -99,11 +138,7 @@ function PartageContent() {
           <div className="bg-muted/50 rounded-xl p-4 flex flex-col gap-2 text-sm text-muted-foreground">
             <p>✅ Votre dossier sera chargé sur <strong>cet appareil</strong>.</p>
             <p>✅ Vous pouvez remplir le formulaire à votre rythme.</p>
-            <p>✅ Une fois terminé, envoyez vos réponses à votre conseiller en un clic.</p>
-            <p className="text-xs mt-1 border-t pt-2">
-              ⚠️ Les données sont stockées localement. N&apos;effacez pas votre historique
-              de navigation avant d&apos;avoir envoyé vos réponses.
-            </p>
+            <p>✅ Vos modifications sont <strong>synchronisées automatiquement</strong> avec votre conseiller.</p>
           </div>
 
           <button

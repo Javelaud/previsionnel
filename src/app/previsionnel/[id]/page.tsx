@@ -35,7 +35,8 @@ import { exportToExcel } from "@/data/previsionnel/excel-export";
 import { SECTEURS_ACTIVITES, TOUTES_ACTIVITES } from "@/data/previsionnel/activites-ape";
 import { RATIOS_SECTORIELS, getStatutRatio, type StatutRatio } from "@/data/previsionnel/ratios-sectoriels";
 import { useEquilibre } from "@/contexts/equilibre-context";
-import { buildInviteUrl, buildReponseUrl } from "@/lib/share";
+import { upsertBudget, subscribeToBudget } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 // ---- Helpers ----
 
@@ -295,6 +296,9 @@ export default function Page() {
   const [reponseUrl, setReponseUrl] = useState("");
   const [reponseCopied, setReponseCopied] = useState(false);
   const [isClientMode, setIsClientMode] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "synced" | "syncing">("idle");
+  const lastLocalSaveRef = useRef<number>(0);
 
   useEffect(() => {
     setMounted(true);
@@ -313,6 +317,26 @@ export default function Page() {
     if (typeof window !== "undefined" && sessionStorage.getItem(`client_mode_${activeBudget.id}`)) {
       setIsClientMode(true);
     }
+
+    // Synchronisation Supabase : upsert initial + récupération du share_token
+    const budgetId = activeBudget.id;
+    upsertBudget(activeBudget).then((token) => {
+      if (token) setShareToken(token);
+    });
+
+    // Realtime : écouter les modifications faites par l'autre partie (client ↔ conseiller)
+    const channel = subscribeToBudget(budgetId, (remoteBudget) => {
+      // Ignorer si on vient de sauvegarder localement (évite la boucle)
+      if (Date.now() - lastLocalSaveRef.current < 3000) return;
+      setBudget(remoteBudget);
+      saveBudget(remoteBudget);
+      setSyncStatus("synced");
+      setTimeout(() => setSyncStatus("idle"), 3000);
+    });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   const updateBudget = useCallback((patch: DeepPartial<BudgetPrevisionnel>) => {
@@ -323,7 +347,9 @@ export default function Page() {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       setSaveStatus("saving");
       saveTimer.current = setTimeout(() => {
-        saveBudget(updated);
+        saveBudget(updated);          // localStorage
+        lastLocalSaveRef.current = Date.now();
+        upsertBudget(updated);        // Supabase (fire & forget — l'autre partie verra les changements en temps réel)
         setSaveStatus("saved");
         setTimeout(() => setSaveStatus("idle"), 2000);
       }, 500);
@@ -391,21 +417,15 @@ export default function Page() {
                 <CheckCircle className="h-3 w-3" /> Sauvegardé
               </span>
             )}
-            {/* Bouton "Envoyer mes réponses" — visible en mode client */}
+            {/* Indicateur de synchronisation — visible en mode client */}
             {isClientMode && (
-              <Button
-                size="sm"
-                className="gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-md hover:shadow-lg transition-all"
-                onClick={() => {
-                  const url = buildReponseUrl(budget);
-                  setReponseUrl(url);
-                  setReponseCopied(false);
-                  setReponseDialogOpen(true);
-                }}
-              >
-                <Send className="h-4 w-4" />
-                Envoyer mes réponses
-              </Button>
+              <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                {syncStatus === "synced" ? "Réponses synchronisées ✓" : "Synchronisé avec votre conseiller"}
+              </div>
             )}
             <Button
               variant="outline"
@@ -511,8 +531,16 @@ export default function Page() {
                       variant="outline"
                       size="sm"
                       className="shrink-0 gap-1.5 border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-400 dark:hover:bg-indigo-950"
-                      onClick={() => {
-                        const url = buildInviteUrl(budget);
+                      onClick={async () => {
+                        // S'assurer que le budget est dans Supabase et récupérer le token
+                        let token = shareToken;
+                        if (!token) {
+                          token = await upsertBudget(budget);
+                          if (token) setShareToken(token);
+                        }
+                        const url = token
+                          ? `${window.location.origin}/partage?token=${token}`
+                          : `${window.location.origin}/partage?token=indisponible`;
                         setInviteUrl(url);
                         setInviteCopied(false);
                         setInviteDialogOpen(true);
@@ -2586,8 +2614,7 @@ export default function Page() {
           <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground flex flex-col gap-1">
             <p>📋 <strong>Étape 1 :</strong> Copiez et envoyez ce lien à votre client (email, WhatsApp…)</p>
             <p>✏️ <strong>Étape 2 :</strong> Le client remplit son dossier sur son appareil</p>
-            <p>📥 <strong>Étape 3 :</strong> Le client clique &quot;Envoyer mes réponses&quot; et vous envoie le lien retour</p>
-            <p>✅ <strong>Étape 4 :</strong> Vous ouvrez ce lien retour pour importer ses réponses</p>
+            <p>🔄 <strong>Étape 3 :</strong> Ses modifications apparaissent <strong>en temps réel</strong> dans votre tableau — ici même !</p>
           </div>
           {budget.infos.email && (
             <Button
@@ -2595,7 +2622,7 @@ export default function Page() {
               onClick={() => {
                 const subject = encodeURIComponent(`Votre dossier prévisionnel — ${budget.infos.intituleProjet || budget.infos.prenomNom}`);
                 const body = encodeURIComponent(
-                  `Bonjour,\n\nJe vous invite à compléter votre dossier prévisionnel en cliquant sur le lien ci-dessous :\n\n${inviteUrl}\n\nUne fois terminé, cliquez sur "Envoyer mes réponses" pour me les transmettre.\n\nCordialement`
+                  `Bonjour,\n\nJe vous invite à compléter votre dossier prévisionnel en cliquant sur le lien ci-dessous :\n\n${inviteUrl}\n\nVos modifications seront synchronisées automatiquement.\n\nCordialement`
                 );
                 window.open(`mailto:${budget.infos.email}?subject=${subject}&body=${body}`);
               }}
@@ -2608,60 +2635,7 @@ export default function Page() {
       </DialogContent>
     </Dialog>
 
-    {/* Dialog — Envoyer mes réponses (mode client) */}
-    <Dialog open={reponseDialogOpen} onOpenChange={setReponseDialogOpen}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Send className="h-5 w-5 text-green-600" />
-            Envoyer mes réponses à mon conseiller
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-4 py-2">
-          <p className="text-sm text-muted-foreground">
-            Copiez ce lien et envoyez-le à votre conseiller (par email, WhatsApp, SMS…).
-            Il pourra importer vos réponses en l&apos;ouvrant.
-          </p>
-          <div className="flex gap-2">
-            <Input
-              readOnly
-              value={reponseUrl}
-              className="text-xs font-mono bg-muted"
-              onFocus={(e) => e.target.select()}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0 gap-1.5"
-              onClick={() => {
-                navigator.clipboard.writeText(reponseUrl);
-                setReponseCopied(true);
-                setTimeout(() => setReponseCopied(false), 3000);
-              }}
-            >
-              {reponseCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-              {reponseCopied ? "Copié !" : "Copier"}
-            </Button>
-          </div>
-          {budget.infos.email && (
-            <Button
-              variant="outline"
-              className="gap-2 w-full"
-              onClick={() => {
-                const subject = encodeURIComponent(`Mes réponses — dossier prévisionnel`);
-                const body = encodeURIComponent(
-                  `Bonjour,\n\nJ'ai complété mon dossier prévisionnel. Voici le lien pour importer mes réponses :\n\n${reponseUrl}\n\nCordialement`
-                );
-                window.open(`mailto:${budget.infos.email}?subject=${subject}&body=${body}`);
-              }}
-            >
-              <Send className="h-4 w-4" />
-              Envoyer par email à mon conseiller
-            </Button>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    {/* Supprimé : dialog "Envoyer mes réponses" — remplacé par sync temps réel Supabase */}
   </>
   );
 }
