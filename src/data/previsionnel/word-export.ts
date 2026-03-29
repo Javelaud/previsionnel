@@ -21,7 +21,6 @@ import {
   PageNumber,
   PageBreak,
   HeadingLevel,
-  LevelFormat,
 } from "docx";
 import type { BudgetPrevisionnel, ResultatsPrevisionnel } from "./types";
 import { getTotalBesoins, getTotalFinancement } from "./calculations";
@@ -161,7 +160,7 @@ function sectionTitle(label: string): Paragraph {
 // PAGE 1 — Couverture / Informations générales
 // ---------------------------------------------------------------------------
 function buildCoverPage(b: BudgetPrevisionnel, r: ResultatsPrevisionnel): Paragraph[] {
-  const { infos, besoins, financement } = b;
+  const { infos } = b;
   const anneeDebut = new Date().getFullYear();
 
   const paragraphs: Paragraph[] = [];
@@ -357,12 +356,9 @@ function buildCompteResultat(r: ResultatsPrevisionnel): Paragraph[] {
 // ---------------------------------------------------------------------------
 // PAGE 3 — Plan de financement
 // ---------------------------------------------------------------------------
-function buildPlanFinancement(b: BudgetPrevisionnel, r: ResultatsPrevisionnel): Paragraph[] {
+function buildPlanFinancement(b: BudgetPrevisionnel): Paragraph[] {
   const paragraphs: Paragraph[] = [sectionTitle("Plan de financement initial")];
   const W = CONTENT_W;
-  const c1 = Math.round(W * 0.6);
-  const c2 = W - c1;
-  const widths = [c1, c2];
 
   const { besoins, financement } = b;
 
@@ -538,13 +534,12 @@ function buildTresorerie(r: ResultatsPrevisionnel): Paragraph[] {
   const paragraphs: Paragraph[] = [sectionTitle("Plan de trésorerie mensuel — Année 1")];
 
   const W = CONTENT_W;
-  const nCols = 13; // libellé + 12 mois
   const labelW = Math.round(W * 0.22);
   const colW = Math.round((W - labelW) / 12);
   const colW12 = W - labelW - 11 * colW;
   const widths = [labelW, ...Array(11).fill(colW), colW12];
 
-  const { tresorerieMensuelleDetail: d, tresorerieMensuelle: t } = r;
+  const { tresorerieMensuelleDetail: d } = r;
 
   const makeRow = (label: string, values: number[], even: boolean, opts?: { bold?: boolean; total?: boolean }) => {
     const cells = [label, ...values.map(v => {
@@ -579,12 +574,10 @@ export async function exportToWord(
   budget: BudgetPrevisionnel,
   resultats: ResultatsPrevisionnel
 ): Promise<void> {
-  const anneeDebut = new Date().getFullYear();
-
   const allChildren = [
     ...buildCoverPage(budget, resultats),
     ...buildCompteResultat(resultats),
-    ...buildPlanFinancement(budget, resultats),
+    ...buildPlanFinancement(budget),
     ...buildBilan(resultats),
     ...buildTresorerie(resultats),
   ];
